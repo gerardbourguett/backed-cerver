@@ -598,40 +598,158 @@ app.get("/api/senadores/resultados", async (req, res) => {
   }
 });
 
-// GET - Obtener candidatos senatoriales
+// GET - Obtener circunscripciones senatoriales disponibles
+app.get("/api/senadores/circunscripciones", async (req, res) => {
+  try {
+    // Obtener circunscripciones únicas desde territorios
+    const circunscripciones = await Territory.aggregate([
+      {
+        $match: {
+          id_cirsen: { $ne: null },
+          glosacirsen: { $ne: null },
+        },
+      },
+      {
+        $group: {
+          _id: "$id_cirsen",
+          id_cirsen: { $first: "$id_cirsen" },
+          glosacirsen: { $first: "$glosacirsen" },
+          orden_cirsen: { $first: "$orden_cirsen" },
+        },
+      },
+      {
+        $sort: { orden_cirsen: 1 },
+      },
+      {
+        $project: {
+          _id: 0,
+          id_cirsen: 1,
+          glosacirsen: 1,
+          orden_cirsen: 1,
+        },
+      },
+    ]);
+
+    res.json({
+      count: circunscripciones.length,
+      data: circunscripciones,
+    });
+  } catch (error) {
+    console.error("Error al consultar circunscripciones:", error);
+    res.status(500).json({
+      error: "Error al consultar circunscripciones senatoriales",
+    });
+  }
+});
+
+// GET - Obtener candidatos senatoriales (opcionalmente filtrados por circunscripción)
 app.get("/api/senadores/candidatos", async (req, res) => {
   try {
-    // Obtener todos los resultados de senadores para extraer candidatos
-    const resultados = await PresidentialResult.find({ id_eleccion: 5 }).lean();
+    const { id_cirsen, circunscripcion } = req.query;
 
-    if (resultados.length === 0) {
-      return res.status(404).json({
-        message: "No se encontraron candidatos de senadores. Use POST /api/senadores/sync para cargar datos.",
-        count: 0,
-      });
-    }
+    let candidatos;
 
-    // Extraer candidatos únicos de los detalles
-    const candidatosMap = new Map();
-    for (const resultado of resultados) {
-      if (resultado.detalles) {
-        for (const detalle of resultado.detalles) {
-          if (detalle.candidatos) {
-            for (const candidato of detalle.candidatos) {
-              if (!candidatosMap.has(candidato.id)) {
-                candidatosMap.set(candidato.id, candidato);
+    if (id_cirsen || circunscripcion) {
+      // Filtrar candidatos por circunscripción usando datos de mesas
+      const cirsenId = id_cirsen ? parseInt(id_cirsen) : null;
+
+      // Construir filtro
+      const mesaFilter = { cod_eleccion: 5 };
+      if (cirsenId) {
+        mesaFilter.id_cirsen = cirsenId;
+      }
+
+      // Obtener candidatos únicos de las mesas de esta circunscripción
+      const mesas = await MesaResult.find(mesaFilter).select("candidatos").lean();
+
+      if (mesas.length === 0) {
+        return res.status(404).json({
+          message: `No se encontraron candidatos para la circunscripción ${cirsenId || circunscripcion}`,
+          count: 0,
+        });
+      }
+
+      // Extraer candidatos únicos
+      const candidatosMap = new Map();
+      for (const mesa of mesas) {
+        if (mesa.candidatos) {
+          for (const candidato of mesa.candidatos) {
+            if (!candidatosMap.has(candidato.id_candidato)) {
+              candidatosMap.set(candidato.id_candidato, {
+                id: candidato.id_candidato,
+                id_partido: candidato.id_partido,
+                id_pacto: candidato.id_pacto,
+                orden: candidato.orden_voto,
+                electo: candidato.electo,
+              });
+            }
+          }
+        }
+      }
+
+      candidatos = Array.from(candidatosMap.values()).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+
+      // Enriquecer con información de nombre desde los resultados totales
+      const resultados = await PresidentialResult.find({ id_eleccion: 5 }).lean();
+      const candidatosInfo = new Map();
+
+      for (const resultado of resultados) {
+        if (resultado.detalles) {
+          for (const detalle of resultado.detalles) {
+            if (detalle.candidatos) {
+              for (const cand of detalle.candidatos) {
+                if (!candidatosInfo.has(cand.id)) {
+                  candidatosInfo.set(cand.id, {
+                    candidato: cand.candidato,
+                    sigla_partido: cand.sigla_partido,
+                    filterName: cand.filterName,
+                  });
+                }
               }
             }
           }
         }
       }
-    }
 
-    const candidatos = Array.from(candidatosMap.values()).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+      // Combinar datos
+      candidatos = candidatos.map((c) => ({
+        ...c,
+        ...(candidatosInfo.get(c.id) || {}),
+      }));
+    } else {
+      // Obtener todos los candidatos de senadores
+      const resultados = await PresidentialResult.find({ id_eleccion: 5 }).lean();
+
+      if (resultados.length === 0) {
+        return res.status(404).json({
+          message: "No se encontraron candidatos de senadores. Use POST /api/senadores/sync para cargar datos.",
+          count: 0,
+        });
+      }
+
+      // Extraer candidatos únicos de los detalles
+      const candidatosMap = new Map();
+      for (const resultado of resultados) {
+        if (resultado.detalles) {
+          for (const detalle of resultado.detalles) {
+            if (detalle.candidatos) {
+              for (const candidato of detalle.candidatos) {
+                if (!candidatosMap.has(candidato.id)) {
+                  candidatosMap.set(candidato.id, candidato);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      candidatos = Array.from(candidatosMap.values()).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+    }
 
     res.json({
       count: candidatos.length,
       data: candidatos,
+      ...(id_cirsen && { id_cirsen: parseInt(id_cirsen) }),
     });
   } catch (error) {
     console.error("Error al consultar candidatos de senadores:", error);
@@ -769,40 +887,158 @@ app.get("/api/diputados/resultados", async (req, res) => {
   }
 });
 
-// GET - Obtener candidatos de diputados
+// GET - Obtener distritos disponibles
+app.get("/api/diputados/distritos", async (req, res) => {
+  try {
+    // Obtener distritos únicos desde territorios
+    const distritos = await Territory.aggregate([
+      {
+        $match: {
+          id_distrito: { $ne: null },
+          distrito: { $ne: null },
+        },
+      },
+      {
+        $group: {
+          _id: "$id_distrito",
+          id_distrito: { $first: "$id_distrito" },
+          distrito: { $first: "$distrito" },
+          orden_distrito: { $first: "$orden_distrito" },
+        },
+      },
+      {
+        $sort: { orden_distrito: 1 },
+      },
+      {
+        $project: {
+          _id: 0,
+          id_distrito: 1,
+          distrito: 1,
+          orden_distrito: 1,
+        },
+      },
+    ]);
+
+    res.json({
+      count: distritos.length,
+      data: distritos,
+    });
+  } catch (error) {
+    console.error("Error al consultar distritos:", error);
+    res.status(500).json({
+      error: "Error al consultar distritos",
+    });
+  }
+});
+
+// GET - Obtener candidatos de diputados (opcionalmente filtrados por distrito)
 app.get("/api/diputados/candidatos", async (req, res) => {
   try {
-    // Obtener todos los resultados de diputados para extraer candidatos
-    const resultados = await PresidentialResult.find({ id_eleccion: 6 }).lean();
+    const { id_distrito, distrito } = req.query;
 
-    if (resultados.length === 0) {
-      return res.status(404).json({
-        message: "No se encontraron candidatos de diputados. Use POST /api/diputados/sync para cargar datos.",
-        count: 0,
-      });
-    }
+    let candidatos;
 
-    // Extraer candidatos únicos de los detalles
-    const candidatosMap = new Map();
-    for (const resultado of resultados) {
-      if (resultado.detalles) {
-        for (const detalle of resultado.detalles) {
-          if (detalle.candidatos) {
-            for (const candidato of detalle.candidatos) {
-              if (!candidatosMap.has(candidato.id)) {
-                candidatosMap.set(candidato.id, candidato);
+    if (id_distrito || distrito) {
+      // Filtrar candidatos por distrito usando datos de mesas
+      const distritoId = id_distrito ? parseInt(id_distrito) : null;
+
+      // Construir filtro
+      const mesaFilter = { cod_eleccion: 6 };
+      if (distritoId) {
+        mesaFilter.id_distrito = distritoId;
+      }
+
+      // Obtener candidatos únicos de las mesas de este distrito
+      const mesas = await MesaResult.find(mesaFilter).select("candidatos").lean();
+
+      if (mesas.length === 0) {
+        return res.status(404).json({
+          message: `No se encontraron candidatos para el distrito ${distritoId || distrito}`,
+          count: 0,
+        });
+      }
+
+      // Extraer candidatos únicos
+      const candidatosMap = new Map();
+      for (const mesa of mesas) {
+        if (mesa.candidatos) {
+          for (const candidato of mesa.candidatos) {
+            if (!candidatosMap.has(candidato.id_candidato)) {
+              candidatosMap.set(candidato.id_candidato, {
+                id: candidato.id_candidato,
+                id_partido: candidato.id_partido,
+                id_pacto: candidato.id_pacto,
+                orden: candidato.orden_voto,
+                electo: candidato.electo,
+              });
+            }
+          }
+        }
+      }
+
+      candidatos = Array.from(candidatosMap.values()).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+
+      // Enriquecer con información de nombre desde los resultados totales
+      const resultados = await PresidentialResult.find({ id_eleccion: 6 }).lean();
+      const candidatosInfo = new Map();
+
+      for (const resultado of resultados) {
+        if (resultado.detalles) {
+          for (const detalle of resultado.detalles) {
+            if (detalle.candidatos) {
+              for (const cand of detalle.candidatos) {
+                if (!candidatosInfo.has(cand.id)) {
+                  candidatosInfo.set(cand.id, {
+                    candidato: cand.candidato,
+                    sigla_partido: cand.sigla_partido,
+                    filterName: cand.filterName,
+                  });
+                }
               }
             }
           }
         }
       }
-    }
 
-    const candidatos = Array.from(candidatosMap.values()).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+      // Combinar datos
+      candidatos = candidatos.map((c) => ({
+        ...c,
+        ...(candidatosInfo.get(c.id) || {}),
+      }));
+    } else {
+      // Obtener todos los candidatos de diputados
+      const resultados = await PresidentialResult.find({ id_eleccion: 6 }).lean();
+
+      if (resultados.length === 0) {
+        return res.status(404).json({
+          message: "No se encontraron candidatos de diputados. Use POST /api/diputados/sync para cargar datos.",
+          count: 0,
+        });
+      }
+
+      // Extraer candidatos únicos de los detalles
+      const candidatosMap = new Map();
+      for (const resultado of resultados) {
+        if (resultado.detalles) {
+          for (const detalle of resultado.detalles) {
+            if (detalle.candidatos) {
+              for (const candidato of detalle.candidatos) {
+                if (!candidatosMap.has(candidato.id)) {
+                  candidatosMap.set(candidato.id, candidato);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      candidatos = Array.from(candidatosMap.values()).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+    }
 
     res.json({
       count: candidatos.length,
       data: candidatos,
+      ...(id_distrito && { id_distrito: parseInt(id_distrito) }),
     });
   } catch (error) {
     console.error("Error al consultar candidatos de diputados:", error);
