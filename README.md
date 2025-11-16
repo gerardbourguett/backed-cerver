@@ -343,19 +343,57 @@ GET /api/senadores/resultados?tipo=nacional
 }
 ```
 
+#### `GET /api/senadores/circunscripciones`
+Obtiene la lista de circunscripciones senatoriales disponibles.
+
+**Respuesta:**
+```json
+{
+  "count": 16,
+  "data": [
+    {
+      "id_cirsen": 1,
+      "glosacirsen": "Tarapacá y Antofagasta",
+      "orden_cirsen": 1
+    },
+    {
+      "id_cirsen": 2,
+      "glosacirsen": "Atacama y Coquimbo",
+      "orden_cirsen": 2
+    }
+  ]
+}
+```
+
 #### `GET /api/senadores/candidatos`
-Obtiene la lista de todos los candidatos senatoriales.
+Obtiene la lista de todos los candidatos senatoriales o filtrados por circunscripción.
+
+**Query params (opcionales):**
+- `id_cirsen`: ID de circunscripción senatorial para filtrar candidatos
+
+**Ejemplos:**
+```bash
+# Todos los candidatos
+GET /api/senadores/candidatos
+
+# Candidatos de una circunscripción específica
+GET /api/senadores/candidatos?id_cirsen=1
+```
 
 **Respuesta:**
 ```json
 {
   "count": 15,
+  "id_cirsen": 1,
   "data": [
     {
       "id": 51900101,
       "orden": 1,
       "candidato": "JUAN PEREZ",
-      "sigla_partido": "PDC"
+      "sigla_partido": "PDC",
+      "id_partido": 101,
+      "id_pacto": 1,
+      "electo": 0
     }
   ]
 }
@@ -421,8 +459,61 @@ GET /api/diputados/resultados
 GET /api/diputados/resultados?tipo=nacional
 ```
 
+#### `GET /api/diputados/distritos`
+Obtiene la lista de distritos disponibles.
+
+**Respuesta:**
+```json
+{
+  "count": 28,
+  "data": [
+    {
+      "id_distrito": 1,
+      "distrito": "Arica y Parinacota",
+      "orden_distrito": 1
+    },
+    {
+      "id_distrito": 2,
+      "distrito": "Tarapacá",
+      "orden_distrito": 2
+    }
+  ]
+}
+```
+
 #### `GET /api/diputados/candidatos`
-Obtiene la lista de todos los candidatos de diputados.
+Obtiene la lista de todos los candidatos de diputados o filtrados por distrito.
+
+**Query params (opcionales):**
+- `id_distrito`: ID de distrito para filtrar candidatos
+
+**Ejemplos:**
+```bash
+# Todos los candidatos
+GET /api/diputados/candidatos
+
+# Candidatos de un distrito específico
+GET /api/diputados/candidatos?id_distrito=1
+```
+
+**Respuesta:**
+```json
+{
+  "count": 25,
+  "id_distrito": 1,
+  "data": [
+    {
+      "id": 61900101,
+      "orden": 1,
+      "candidato": "MARIA GONZALEZ",
+      "sigla_partido": "PS",
+      "id_partido": 102,
+      "id_pacto": 2,
+      "electo": 0
+    }
+  ]
+}
+```
 
 #### `GET /api/diputados/mesas`
 Obtiene resultados por mesa de diputados.
