@@ -387,15 +387,57 @@ app.get("/api/presidenciales/mesas/:id_mesa", async (req, res) => {
   }
 });
 
-// POST - Sincronizar manualmente
+// POST - Sincronizar manualmente (totales y mesas en paralelo)
 app.post("/api/presidenciales/sync", async (req, res) => {
   try {
-    const result = await syncService.syncNow();
+    // Iniciar sincronización pero no esperar a que termine
+    syncService.syncNow().catch((error) => {
+      console.error("Error en sincronización asíncrona:", error);
+    });
+
+    res.json({
+      success: true,
+      message: "Sincronización iniciada en segundo plano. Use GET /api/presidenciales/sync/stats para ver el progreso.",
+    });
+  } catch (error) {
+    console.error("Error al iniciar sincronización:", error);
+    res.status(500).json({
+      error: "Error al iniciar sincronización",
+      details: error.message,
+    });
+  }
+});
+
+// POST - Sincronizar solo totales (rápido)
+app.post("/api/presidenciales/sync/totales", async (req, res) => {
+  try {
+    const result = await syncService.syncTotales();
     res.json(result);
   } catch (error) {
-    console.error("Error en sincronización manual:", error);
+    console.error("Error en sincronización de totales:", error);
     res.status(500).json({
-      error: "Error en sincronización",
+      error: "Error en sincronización de totales",
+      details: error.message,
+    });
+  }
+});
+
+// POST - Sincronizar solo mesas (lento, ~40K registros)
+app.post("/api/presidenciales/sync/mesas", async (req, res) => {
+  try {
+    // Iniciar sincronización en segundo plano
+    syncService.syncMesas().catch((error) => {
+      console.error("Error en sincronización de mesas:", error);
+    });
+
+    res.json({
+      success: true,
+      message: "Sincronización de mesas iniciada en segundo plano. Use GET /api/presidenciales/sync/stats para ver el progreso.",
+    });
+  } catch (error) {
+    console.error("Error al iniciar sincronización de mesas:", error);
+    res.status(500).json({
+      error: "Error al iniciar sincronización de mesas",
       details: error.message,
     });
   }
