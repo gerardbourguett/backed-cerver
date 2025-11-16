@@ -563,6 +563,177 @@ app.get("/api/presidenciales/sync/stats", async (req, res) => {
   }
 });
 
+// ============= SENADORES =============
+
+// GET - Obtener resultados senatoriales desde BD
+app.get("/api/senadores/resultados", async (req, res) => {
+  try {
+    const { tipo } = req.query; // "nacional", "extranjero", o vacío para todos
+
+    const filter = { id_eleccion: 5 }; // ID 5 = Senadores
+    if (tipo) {
+      filter.name = new RegExp(tipo, "i");
+    }
+
+    const resultados = await PresidentialResult.find(filter)
+      .sort({ iteracion: -1 })
+      .lean();
+
+    if (resultados.length === 0) {
+      return res.status(404).json({
+        message: "No se encontraron resultados de senadores. Use POST /api/senadores/sync para cargar datos.",
+        count: 0,
+      });
+    }
+
+    res.json({
+      count: resultados.length,
+      data: resultados,
+    });
+  } catch (error) {
+    console.error("Error al consultar resultados de senadores:", error);
+    res.status(500).json({
+      error: "Error al consultar resultados de senadores",
+    });
+  }
+});
+
+// GET - Obtener candidatos senatoriales
+app.get("/api/senadores/candidatos", async (req, res) => {
+  try {
+    // Obtener todos los resultados de senadores para extraer candidatos
+    const resultados = await PresidentialResult.find({ id_eleccion: 5 }).lean();
+
+    if (resultados.length === 0) {
+      return res.status(404).json({
+        message: "No se encontraron candidatos de senadores. Use POST /api/senadores/sync para cargar datos.",
+        count: 0,
+      });
+    }
+
+    // Extraer candidatos únicos de los detalles
+    const candidatosMap = new Map();
+    for (const resultado of resultados) {
+      if (resultado.detalles) {
+        for (const detalle of resultado.detalles) {
+          if (detalle.candidatos) {
+            for (const candidato of detalle.candidatos) {
+              if (!candidatosMap.has(candidato.id)) {
+                candidatosMap.set(candidato.id, candidato);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const candidatos = Array.from(candidatosMap.values()).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+
+    res.json({
+      count: candidatos.length,
+      data: candidatos,
+    });
+  } catch (error) {
+    console.error("Error al consultar candidatos de senadores:", error);
+    res.status(500).json({
+      error: "Error al consultar candidatos de senadores",
+    });
+  }
+});
+
+// GET - Obtener resultados por mesa de senadores
+app.get("/api/senadores/mesas", async (req, res) => {
+  try {
+    const { region, comuna, local, mesa, instalada } = req.query;
+
+    // Construir filtro dinámico
+    const filter = { cod_eleccion: 5 }; // ID 5 = Senadores
+    if (region) filter.id_region = parseInt(region);
+    if (comuna) filter.id_comuna = parseInt(comuna);
+    if (local) filter.id_local = parseInt(local);
+    if (mesa) filter.id_mesa = mesa;
+    if (instalada !== undefined) filter.instalada = parseInt(instalada);
+
+    const mesas = await MesaResult.find(filter).lean();
+
+    if (mesas.length === 0) {
+      return res.status(404).json({
+        message: "No se encontraron resultados por mesa de senadores. Use POST /api/senadores/sync para cargar datos.",
+        count: 0,
+      });
+    }
+
+    res.json({
+      count: mesas.length,
+      data: mesas,
+    });
+  } catch (error) {
+    console.error("Error al consultar mesas de senadores:", error);
+    res.status(500).json({
+      error: "Error al consultar resultados por mesa de senadores",
+    });
+  }
+});
+
+// POST - Sincronizar senadores manualmente
+app.post("/api/senadores/sync", async (req, res) => {
+  try {
+    // Iniciar sincronización pero no esperar a que termine
+    Promise.all([
+      syncService.syncTotalesSenadores(),
+      syncService.syncMesasSenadores()
+    ]).catch((error) => {
+      console.error("Error en sincronización de senadores:", error);
+    });
+
+    res.json({
+      success: true,
+      message: "Sincronización de senadores iniciada en segundo plano. Use GET /api/presidenciales/sync/stats para ver el progreso.",
+    });
+  } catch (error) {
+    console.error("Error al iniciar sincronización de senadores:", error);
+    res.status(500).json({
+      error: "Error al iniciar sincronización de senadores",
+      details: error.message,
+    });
+  }
+});
+
+// POST - Sincronizar solo totales senadores
+app.post("/api/senadores/sync/totales", async (req, res) => {
+  try {
+    const result = await syncService.syncTotalesSenadores();
+    res.json(result);
+  } catch (error) {
+    console.error("Error en sincronización de totales de senadores:", error);
+    res.status(500).json({
+      error: "Error en sincronización de totales de senadores",
+      details: error.message,
+    });
+  }
+});
+
+// POST - Sincronizar solo mesas senadores
+app.post("/api/senadores/sync/mesas", async (req, res) => {
+  try {
+    // Iniciar sincronización en segundo plano
+    syncService.syncMesasSenadores().catch((error) => {
+      console.error("Error en sincronización de mesas de senadores:", error);
+    });
+
+    res.json({
+      success: true,
+      message: "Sincronización de mesas de senadores iniciada en segundo plano. Use GET /api/presidenciales/sync/stats para ver el progreso.",
+    });
+  } catch (error) {
+    console.error("Error al iniciar sincronización de mesas de senadores:", error);
+    res.status(500).json({
+      error: "Error al iniciar sincronización de mesas de senadores",
+      details: error.message,
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
