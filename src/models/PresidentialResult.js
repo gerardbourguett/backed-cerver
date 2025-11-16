@@ -10,25 +10,44 @@ const candidatoDetalleSchema = new mongoose.Schema(
     filterName: { type: String },
     sigla_partido: { type: String },
     totalVotosCandidatos: { type: Number },
+    id_pacto: { type: Number },
+    id_partido: { type: Number },
+    id_subpacto: { type: Number },
   },
-  { _id: false }
+  { _id: false, strict: false }
+);
+
+// Sub-esquema para partidos dentro de detalles
+const partidoDetalleSchema = new mongoose.Schema(
+  {
+    partido: { type: String },
+    candidatos: [{ type: mongoose.Schema.Types.Mixed }],
+    filterName: { type: String },
+    id_partido: { type: Number },
+    porc_votos: { type: Number },
+    sigla_partido: { type: String },
+    totalNominados: { type: Number },
+    totalCandidatos: { type: Number },
+    totalVotosPartido: { type: Number },
+  },
+  { _id: false, strict: false }
 );
 
 // Sub-esquema para detalles (pactos/listas)
 const detalleSchema = new mongoose.Schema(
   {
     name: { type: String },
-    lista: { type: String },
-    partidos: [{ type: String }],
+    lista: { type: mongoose.Schema.Types.Mixed }, // Puede ser string o número
+    partidos: { type: mongoose.Schema.Types.Mixed }, // Puede ser array de strings o array de objetos
     candidatos: [candidatoDetalleSchema],
     filterName: { type: String },
-    porc_votos: { type: String },
+    porc_votos: { type: mongoose.Schema.Types.Mixed }, // Puede ser string o null
     glosa_pacto: { type: String },
     totalNominados: { type: Number },
     totalCandidatos: { type: Number },
     totalVotosLista: { type: Number },
   },
-  { _id: false }
+  { _id: false, strict: false }
 );
 
 // Esquema principal de resultados presidenciales
