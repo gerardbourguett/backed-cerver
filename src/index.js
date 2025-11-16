@@ -815,6 +815,96 @@ app.get("/api/senadores/resultados/circunscripcion/:id_cirsen", async (req, res)
   }
 });
 
+// GET - Obtener SOLO candidatos electos por circunscripción (método D'Hont)
+app.get("/api/senadores/electos/circunscripcion/:id_cirsen", async (req, res) => {
+  try {
+    const { id_cirsen } = req.params;
+    const cirsenId = parseInt(id_cirsen);
+
+    // Obtener información de la circunscripción
+    const circunscripcion = await Territory.findOne({ id_cirsen: cirsenId })
+      .select("id_cirsen glosacirsen")
+      .lean();
+
+    if (!circunscripcion) {
+      return res.status(404).json({
+        error: `Circunscripción ${id_cirsen} no encontrada`,
+      });
+    }
+
+    // Obtener mesas con candidatos electos
+    const mesas = await MesaResult.find({
+      cod_eleccion: 5,
+      id_cirsen: cirsenId,
+      "candidatos.electo": 1, // Solo mesas que tienen al menos un electo
+    })
+      .select("candidatos")
+      .lean();
+
+    // Extraer candidatos electos únicos
+    const electosMap = new Map();
+    for (const mesa of mesas) {
+      if (mesa.candidatos) {
+        for (const candidato of mesa.candidatos) {
+          if (candidato.electo === 1 && !electosMap.has(candidato.id_candidato)) {
+            electosMap.set(candidato.id_candidato, {
+              id: candidato.id_candidato,
+              id_partido: candidato.id_partido,
+              id_pacto: candidato.id_pacto,
+              orden: candidato.orden_voto,
+            });
+          }
+        }
+      }
+    }
+
+    // Enriquecer con información desde resultados totales
+    const resultados = await PresidentialResult.find({ id_eleccion: 5 }).lean();
+    const candidatosInfo = new Map();
+
+    for (const resultado of resultados) {
+      if (resultado.detalles) {
+        for (const detalle of resultado.detalles) {
+          if (detalle.candidatos) {
+            for (const cand of detalle.candidatos) {
+              if (!candidatosInfo.has(cand.id)) {
+                candidatosInfo.set(cand.id, {
+                  candidato: cand.candidato,
+                  sigla_partido: cand.sigla_partido,
+                  filterName: cand.filterName,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Combinar datos
+    const electos = Array.from(electosMap.values())
+      .map((c) => ({
+        ...c,
+        electo: 1,
+        ...(candidatosInfo.get(c.id) || {}),
+      }))
+      .sort((a, b) => (a.orden || 0) - (b.orden || 0));
+
+    res.json({
+      circunscripcion: {
+        id_cirsen: cirsenId,
+        nombre: circunscripcion.glosacirsen,
+      },
+      total_electos: electos.length,
+      electos: electos,
+    });
+  } catch (error) {
+    console.error("Error al consultar electos por circunscripción:", error);
+    res.status(500).json({
+      error: "Error al consultar senadores electos",
+    });
+  }
+});
+
 // GET - Obtener candidatos senatoriales (opcionalmente filtrados por circunscripción)
 app.get("/api/senadores/candidatos", async (req, res) => {
   try {
@@ -1273,6 +1363,96 @@ app.get("/api/diputados/resultados/distrito/:id_distrito", async (req, res) => {
     console.error("Error al consultar resultados por distrito:", error);
     res.status(500).json({
       error: "Error al consultar resultados de diputados por distrito",
+    });
+  }
+});
+
+// GET - Obtener SOLO candidatos electos por distrito (método D'Hont)
+app.get("/api/diputados/electos/distrito/:id_distrito", async (req, res) => {
+  try {
+    const { id_distrito } = req.params;
+    const distritoId = parseInt(id_distrito);
+
+    // Obtener información del distrito
+    const distrito = await Territory.findOne({ id_distrito: distritoId })
+      .select("id_distrito distrito")
+      .lean();
+
+    if (!distrito) {
+      return res.status(404).json({
+        error: `Distrito ${id_distrito} no encontrado`,
+      });
+    }
+
+    // Obtener mesas con candidatos electos
+    const mesas = await MesaResult.find({
+      cod_eleccion: 6,
+      id_distrito: distritoId,
+      "candidatos.electo": 1, // Solo mesas que tienen al menos un electo
+    })
+      .select("candidatos")
+      .lean();
+
+    // Extraer candidatos electos únicos
+    const electosMap = new Map();
+    for (const mesa of mesas) {
+      if (mesa.candidatos) {
+        for (const candidato of mesa.candidatos) {
+          if (candidato.electo === 1 && !electosMap.has(candidato.id_candidato)) {
+            electosMap.set(candidato.id_candidato, {
+              id: candidato.id_candidato,
+              id_partido: candidato.id_partido,
+              id_pacto: candidato.id_pacto,
+              orden: candidato.orden_voto,
+            });
+          }
+        }
+      }
+    }
+
+    // Enriquecer con información desde resultados totales
+    const resultados = await PresidentialResult.find({ id_eleccion: 6 }).lean();
+    const candidatosInfo = new Map();
+
+    for (const resultado of resultados) {
+      if (resultado.detalles) {
+        for (const detalle of resultado.detalles) {
+          if (detalle.candidatos) {
+            for (const cand of detalle.candidatos) {
+              if (!candidatosInfo.has(cand.id)) {
+                candidatosInfo.set(cand.id, {
+                  candidato: cand.candidato,
+                  sigla_partido: cand.sigla_partido,
+                  filterName: cand.filterName,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Combinar datos
+    const electos = Array.from(electosMap.values())
+      .map((c) => ({
+        ...c,
+        electo: 1,
+        ...(candidatosInfo.get(c.id) || {}),
+      }))
+      .sort((a, b) => (a.orden || 0) - (b.orden || 0));
+
+    res.json({
+      distrito: {
+        id_distrito: distritoId,
+        nombre: distrito.distrito,
+      },
+      total_electos: electos.length,
+      electos: electos,
+    });
+  } catch (error) {
+    console.error("Error al consultar electos por distrito:", error);
+    res.status(500).json({
+      error: "Error al consultar diputados electos",
     });
   }
 });
