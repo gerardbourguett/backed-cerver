@@ -18,6 +18,10 @@ class SyncService {
     this.lastIteracionSenadores = null;
     this.lastIteracionMesasSenadores = null;
 
+    // Tracking para diputados (ID 6)
+    this.lastIteracionDiputados = null;
+    this.lastIteracionMesasDiputados = null;
+
     this.syncStats = {
       lastSync: null,
       successCount: 0,
@@ -27,6 +31,8 @@ class SyncService {
       lastInstalacionSync: null,
       lastSenadoresSync: null,
       lastMesasSenadoresSync: null,
+      lastDiputadosSync: null,
+      lastMesasDiputadosSync: null,
     };
 
     // Configuración de fases electorales (horarios en formato HH:MM, hora de Chile)
@@ -157,12 +163,14 @@ class SyncService {
 
         case "conteo":
           // 18:00+: Todo (conteo de votos)
-          console.log("📊 Fase de conteo: sincronizando todo (presidenciales, senadores, mesas, instalación)");
+          console.log("📊 Fase de conteo: sincronizando todo (presidenciales, senadores, diputados, mesas, instalación)");
           syncPromises = [
             this.syncTotales(),
             this.syncMesas(),
             this.syncTotalesSenadores(),
             this.syncMesasSenadores(),
+            this.syncTotalesDiputados(),
+            this.syncMesasDiputados(),
             this.syncInstalacion(),
           ];
           break;
@@ -186,6 +194,8 @@ class SyncService {
             this.syncMesas(),
             this.syncTotalesSenadores(),
             this.syncMesasSenadores(),
+            this.syncTotalesDiputados(),
+            this.syncMesasDiputados(),
             this.syncInstalacion(),
           ];
           break;
@@ -205,7 +215,9 @@ class SyncService {
           mesas: results[1]?.status === "fulfilled" ? results[1].value : { error: results[1]?.reason?.message },
           senadoresTotales: results[2]?.status === "fulfilled" ? results[2].value : { error: results[2]?.reason?.message },
           senadoresMesas: results[3]?.status === "fulfilled" ? results[3].value : { error: results[3]?.reason?.message },
-          instalacion: results[4]?.status === "fulfilled" ? results[4].value : { error: results[4]?.reason?.message },
+          diputadosTotales: results[4]?.status === "fulfilled" ? results[4].value : { error: results[4]?.reason?.message },
+          diputadosMesas: results[5]?.status === "fulfilled" ? results[5].value : { error: results[5]?.reason?.message },
+          instalacion: results[6]?.status === "fulfilled" ? results[6].value : { error: results[6]?.reason?.message },
         };
       }
 
@@ -661,6 +673,66 @@ class SyncService {
     };
   }
 
+  // ============= MÉTODOS PARA DIPUTADOS (ID 6) =============
+
+  // Sincronizar totales diputados (total_votacion_6.zip)
+  async syncTotalesDiputados() {
+    const data = await this.fetchElectionData(6); // ID 6 = Diputados
+
+    if (!data || data.length === 0) {
+      return { success: false, message: "No hay datos de diputados disponibles", changed: false };
+    }
+
+    // Verificar si hay cambios usando iteracion
+    const newIteracion = data[0]?.iteracion;
+    if (newIteracion === this.lastIteracionDiputados) {
+      return { success: true, message: "Sin cambios en diputados", changed: false, iteracion: newIteracion };
+    }
+
+    // Hay cambios, actualizar BD
+    const result = await this.updateDatabase(data);
+
+    this.lastIteracionDiputados = newIteracion;
+    this.syncStats.lastDiputadosSync = new Date();
+
+    return {
+      success: true,
+      message: "Totales de diputados actualizados",
+      changed: true,
+      iteracion: newIteracion,
+      ...result,
+    };
+  }
+
+  // Sincronizar resultados por mesa diputados (nomina_completa_6.zip)
+  async syncMesasDiputados() {
+    const data = await this.fetchMesasElectionData(6); // ID 6 = Diputados
+
+    if (!data || data.length === 0) {
+      return { success: false, message: "No hay datos de mesas de diputados disponibles", changed: false };
+    }
+
+    // Verificar si hay cambios usando iteracion
+    const newIteracion = data[0]?.iteracion;
+    if (newIteracion === this.lastIteracionMesasDiputados) {
+      return { success: true, message: "Sin cambios en mesas de diputados", changed: false, iteracion: newIteracion };
+    }
+
+    // Hay cambios, actualizar BD
+    const result = await this.updateMesasDatabase(data);
+
+    this.lastIteracionMesasDiputados = newIteracion;
+    this.syncStats.lastMesasDiputadosSync = new Date();
+
+    return {
+      success: true,
+      message: "Mesas de diputados actualizadas",
+      changed: true,
+      iteracion: newIteracion,
+      ...result,
+    };
+  }
+
   // Método genérico para descargar datos de cualquier elección
   async fetchElectionData(electionId) {
     const url = `${this.apiUrl}/total_votacion_${electionId}.zip`;
@@ -731,6 +803,8 @@ class SyncService {
       lastIteracionInstalacion: this.lastIteracionInstalacion,
       lastIteracionSenadores: this.lastIteracionSenadores,
       lastIteracionMesasSenadores: this.lastIteracionMesasSenadores,
+      lastIteracionDiputados: this.lastIteracionDiputados,
+      lastIteracionMesasDiputados: this.lastIteracionMesasDiputados,
       smartSync: {
         enabled: this.enableSmartSync,
         currentPhase: this.getCurrentElectoralPhase(),
