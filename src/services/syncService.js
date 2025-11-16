@@ -564,10 +564,10 @@ class SyncService {
   }
 
   // Actualizar base de datos con resultados por mesa
-  async updateMesasDatabase(data) {
+  async updateMesasDatabase(data, customBatchSize = null) {
     console.log(`Procesando ${data.length} registros de mesas en lotes...`);
 
-    const BATCH_SIZE = 1000; // Procesar 1000 registros a la vez
+    const BATCH_SIZE = customBatchSize || 1000; // Procesar 1000 registros por defecto, o el tamaño personalizado
     let totalInserted = 0;
     let totalModified = 0;
 
@@ -802,8 +802,8 @@ class SyncService {
       return { success: true, message: "Sin cambios en mesas de diputados", changed: false, iteracion: newIteracion };
     }
 
-    // Hay cambios, actualizar BD
-    const result = await this.updateMesasDatabase(data);
+    // Hay cambios, actualizar BD con batch size menor (diputados tiene MUCHOS más datos - 40,473 mesas)
+    const result = await this.updateMesasDatabase(data, 500); // Usar batch size de 500 en lugar de 1000
 
     this.lastIteracionMesasDiputados = newIteracion;
     this.syncStats.lastMesasDiputadosSync = new Date();
