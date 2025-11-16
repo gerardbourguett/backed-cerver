@@ -2,6 +2,7 @@ import axios from "axios";
 import AdmZip from "adm-zip";
 import PresidentialResult from "../models/PresidentialResult.js";
 import Candidate from "../models/Candidate.js";
+import MesaResult from "../models/MesaResult.js";
 
 class SyncService {
   constructor(apiUrl) {
@@ -10,11 +11,13 @@ class SyncService {
     this.intervalId = null;
     this.syncInterval = parseInt(process.env.SYNC_INTERVAL || "60000"); // Default: 60 segundos
     this.lastIteracion = null;
+    this.lastIteracionMesas = null;
     this.syncStats = {
       lastSync: null,
       successCount: 0,
       errorCount: 0,
       lastError: null,
+      lastMesasSync: null,
     };
   }
 
@@ -62,34 +65,33 @@ class SyncService {
     try {
       console.log(`🔄 [${new Date().toISOString()}] Sincronizando datos presidenciales...`);
 
-      const data = await this.fetchPresidentialData();
+      // Sincronizar totales y mesas en paralelo
+      const [totalesResult, mesasResult] = await Promise.allSettled([
+        this.syncTotales(),
+        this.syncMesas(),
+      ]);
 
-      if (!data || data.length === 0) {
-        console.log("⚠️  No se obtuvieron datos de la API");
-        return { success: false, message: "No hay datos disponibles" };
-      }
+      const result = {
+        totales: totalesResult.status === "fulfilled" ? totalesResult.value : { error: totalesResult.reason?.message },
+        mesas: mesasResult.status === "fulfilled" ? mesasResult.value : { error: mesasResult.reason?.message },
+      };
 
-      // Verificar si hay cambios usando iteracion
-      const newIteracion = data[0]?.iteracion;
-      if (newIteracion === this.lastIteracion) {
-        console.log(`✅ Sin cambios (iteración: ${newIteracion})`);
-        return { success: true, message: "Sin cambios", changed: false };
-      }
-
-      // Hay cambios, actualizar BD
-      const result = await this.updateDatabase(data);
-
-      this.lastIteracion = newIteracion;
       this.syncStats.lastSync = new Date();
-      this.syncStats.successCount++;
 
-      console.log(`✅ Sincronización exitosa (iteración: ${newIteracion})`, result);
+      const hasChanges =
+        (totalesResult.status === "fulfilled" && totalesResult.value.changed) ||
+        (mesasResult.status === "fulfilled" && mesasResult.value.changed);
+
+      if (hasChanges) {
+        this.syncStats.successCount++;
+      }
+
+      console.log(`✅ Sincronización completada`, result);
 
       return {
         success: true,
-        message: "Datos actualizados",
-        changed: true,
-        iteracion: newIteracion,
+        message: hasChanges ? "Datos actualizados" : "Sin cambios",
+        changed: hasChanges,
         ...result,
       };
     } catch (error) {
@@ -103,6 +105,63 @@ class SyncService {
         error: true,
       };
     }
+  }
+
+  // Sincronizar totales (total_votacion_4.zip)
+  async syncTotales() {
+    const data = await this.fetchPresidentialData();
+
+    if (!data || data.length === 0) {
+      return { success: false, message: "No hay datos disponibles", changed: false };
+    }
+
+    // Verificar si hay cambios usando iteracion
+    const newIteracion = data[0]?.iteracion;
+    if (newIteracion === this.lastIteracion) {
+      return { success: true, message: "Sin cambios", changed: false, iteracion: newIteracion };
+    }
+
+    // Hay cambios, actualizar BD
+    const result = await this.updateDatabase(data);
+
+    this.lastIteracion = newIteracion;
+
+    return {
+      success: true,
+      message: "Totales actualizados",
+      changed: true,
+      iteracion: newIteracion,
+      ...result,
+    };
+  }
+
+  // Sincronizar resultados por mesa (nomina_completa_4.zip)
+  async syncMesas() {
+    const data = await this.fetchMesasData();
+
+    if (!data || data.length === 0) {
+      return { success: false, message: "No hay datos de mesas disponibles", changed: false };
+    }
+
+    // Verificar si hay cambios usando iteracion
+    const newIteracion = data[0]?.iteracion;
+    if (newIteracion === this.lastIteracionMesas) {
+      return { success: true, message: "Sin cambios en mesas", changed: false, iteracion: newIteracion };
+    }
+
+    // Hay cambios, actualizar BD
+    const result = await this.updateMesasDatabase(data);
+
+    this.lastIteracionMesas = newIteracion;
+    this.syncStats.lastMesasSync = new Date();
+
+    return {
+      success: true,
+      message: "Mesas actualizadas",
+      changed: true,
+      iteracion: newIteracion,
+      ...result,
+    };
   }
 
   // Descargar datos de SERVEL
@@ -205,12 +264,71 @@ class SyncService {
     };
   }
 
+  // Descargar datos de mesas de SERVEL
+  async fetchMesasData() {
+    const url = `${this.apiUrl}/nomina_completa_4.zip`;
+
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 60000, // Más tiempo porque es un archivo grande (40K+ registros)
+      headers: {
+        Accept: "application/zip,application/octet-stream;q=0.9,*/*;q=0.8",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        Referer: "https://elecciones.servel.cl/",
+        Origin: "https://elecciones.servel.cl",
+      },
+    });
+
+    const buffer = Buffer.from(response.data);
+    const zip = new AdmZip(buffer);
+    const zipEntries = zip.getEntries();
+
+    const jsonEntry = zipEntries.find((entry) => entry.entryName.endsWith(".json"));
+
+    if (!jsonEntry) {
+      throw new Error("Archivo JSON no encontrado en nomina_completa_4.zip");
+    }
+
+    const jsonContent = zip.readAsText(jsonEntry, "utf8");
+    return JSON.parse(jsonContent);
+  }
+
+  // Actualizar base de datos con resultados por mesa
+  async updateMesasDatabase(data) {
+    console.log(`Procesando ${data.length} registros de mesas...`);
+
+    // Usar bulkWrite para mejor rendimiento
+    const bulkOps = data.map((mesa) => ({
+      updateOne: {
+        filter: { id_mesa: mesa.id_mesa },
+        update: { $set: mesa },
+        upsert: true,
+      },
+    }));
+
+    const result = await MesaResult.bulkWrite(bulkOps, { ordered: false });
+
+    console.log("Resultados por mesa actualizados:", {
+      insertados: result.upsertedCount,
+      actualizados: result.modifiedCount,
+      total: data.length,
+    });
+
+    return {
+      insertados: result.upsertedCount,
+      actualizados: result.modifiedCount,
+      total: data.length,
+    };
+  }
+
   // Obtener estadísticas
   getStats() {
     return {
       isRunning: this.isRunning,
       syncInterval: this.syncInterval,
       lastIteracion: this.lastIteracion,
+      lastIteracionMesas: this.lastIteracionMesas,
       ...this.syncStats,
     };
   }
