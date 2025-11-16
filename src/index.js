@@ -6,6 +6,9 @@ import dotenv from "dotenv";
 
 import connectDB from "./config/database.js";
 import Territory from "./models/Territory.js";
+import PresidentialResult from "./models/PresidentialResult.js";
+import Candidate from "./models/Candidate.js";
+import SyncService from "./services/syncService.js";
 
 dotenv.config();
 const apiUrl = (process.env.API_URL || "https://elecciones.servel.cl")
@@ -21,6 +24,15 @@ app.use(express.json());
 
 // Conectar a MongoDB
 connectDB();
+
+// Inicializar servicio de sincronización
+const syncService = new SyncService(apiUrl);
+
+// Auto-iniciar sincronización si está configurado
+if (process.env.AUTO_START_SYNC === "true") {
+  console.log("🤖 Auto-inicio de sincronización habilitado");
+  syncService.start();
+}
 
 // GET - Consultar territorios desde la base de datos
 app.get("/api/territorios/nacional", async (req, res) => {
@@ -210,109 +222,126 @@ app.get("/api/resultados/constitucion", async (req, res) => {
 
 // ============= PRESIDENCIALES =============
 
-// GET - Explorar estructura de nómina completa (temporal)
-app.get("/api/presidenciales/nomina/explorar", async (req, res) => {
+// GET - Obtener resultados presidenciales desde BD
+app.get("/api/presidenciales/resultados", async (req, res) => {
   try {
-    const url = `${apiUrl}/nomina_completa_4.zip`;
-    console.log(`Descargando nómina desde ${url}...`);
+    const { tipo } = req.query; // "nacional", "extranjero", o vacío para todos
 
-    const response = await axios.get(url, {
-      responseType: "arraybuffer",
-      timeout: 30000,
-      headers: {
-        Accept: "application/zip,application/octet-stream;q=0.9,*/*;q=0.8",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        Referer: "https://elecciones.servel.cl/",
-        Origin: "https://elecciones.servel.cl",
-      },
-    });
+    const filter = {};
+    if (tipo) {
+      filter.name = new RegExp(tipo, "i");
+    }
 
-    const buffer = Buffer.from(response.data);
-    const zip = new AdmZip(buffer);
-    const zipEntries = zip.getEntries();
+    const resultados = await PresidentialResult.find(filter)
+      .sort({ iteracion: -1 })
+      .lean();
 
-    // Listar todos los archivos en el ZIP
-    const fileNames = zipEntries.map((entry) => entry.entryName);
-
-    // Buscar JSON
-    const jsonEntry = zipEntries.find((entry) => entry.entryName.endsWith(".json"));
-
-    if (!jsonEntry) {
-      return res.json({
-        archivos: fileNames,
-        mensaje: "No se encontró archivo JSON en el ZIP",
+    if (resultados.length === 0) {
+      return res.status(404).json({
+        message: "No se encontraron resultados. Use POST /api/presidenciales/sync para cargar datos.",
+        count: 0,
       });
     }
 
-    const jsonContent = zip.readAsText(jsonEntry, "utf8");
-    const data = JSON.parse(jsonContent);
-
-    // Retornar estructura de muestra
     res.json({
-      archivo: jsonEntry.entryName,
-      total_registros: data.length || "N/A",
-      estructura_ejemplo: Array.isArray(data) ? data[0] : data,
-      primeros_5: Array.isArray(data) ? data.slice(0, 5) : data,
+      count: resultados.length,
+      data: resultados,
     });
   } catch (error) {
-    console.error("Error al explorar nómina:", error);
+    console.error("Error al consultar resultados:", error);
     res.status(500).json({
-      error: "Error al explorar nómina",
+      error: "Error al consultar resultados presidenciales",
+    });
+  }
+});
+
+// GET - Obtener candidatos
+app.get("/api/presidenciales/candidatos", async (req, res) => {
+  try {
+    const candidatos = await Candidate.find().sort({ orden: 1 }).lean();
+
+    if (candidatos.length === 0) {
+      return res.status(404).json({
+        message: "No se encontraron candidatos. Use POST /api/presidenciales/sync para cargar datos.",
+        count: 0,
+      });
+    }
+
+    res.json({
+      count: candidatos.length,
+      data: candidatos,
+    });
+  } catch (error) {
+    console.error("Error al consultar candidatos:", error);
+    res.status(500).json({
+      error: "Error al consultar candidatos",
+    });
+  }
+});
+
+// POST - Sincronizar manualmente
+app.post("/api/presidenciales/sync", async (req, res) => {
+  try {
+    const result = await syncService.syncNow();
+    res.json(result);
+  } catch (error) {
+    console.error("Error en sincronización manual:", error);
+    res.status(500).json({
+      error: "Error en sincronización",
       details: error.message,
     });
   }
 });
 
-// GET - Explorar estructura de total votación (temporal)
-app.get("/api/presidenciales/votacion/explorar", async (req, res) => {
+// POST - Iniciar sincronización automática
+app.post("/api/presidenciales/sync/start", async (req, res) => {
   try {
-    const url = `${apiUrl}/total_votacion_4.zip`;
-    console.log(`Descargando votación desde ${url}...`);
-
-    const response = await axios.get(url, {
-      responseType: "arraybuffer",
-      timeout: 30000,
-      headers: {
-        Accept: "application/zip,application/octet-stream;q=0.9,*/*;q=0.8",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-        Referer: "https://elecciones.servel.cl/",
-        Origin: "https://elecciones.servel.cl",
-      },
-    });
-
-    const buffer = Buffer.from(response.data);
-    const zip = new AdmZip(buffer);
-    const zipEntries = zip.getEntries();
-
-    // Listar todos los archivos en el ZIP
-    const fileNames = zipEntries.map((entry) => entry.entryName);
-
-    // Buscar JSON
-    const jsonEntry = zipEntries.find((entry) => entry.entryName.endsWith(".json"));
-
-    if (!jsonEntry) {
-      return res.json({
-        archivos: fileNames,
-        mensaje: "No se encontró archivo JSON en el ZIP",
-      });
-    }
-
-    const jsonContent = zip.readAsText(jsonEntry, "utf8");
-    const data = JSON.parse(jsonContent);
-
-    // Retornar estructura de muestra
+    const started = syncService.start();
     res.json({
-      archivo: jsonEntry.entryName,
-      total_registros: data.length || "N/A",
-      estructura_ejemplo: Array.isArray(data) ? data[0] : data,
-      primeros_5: Array.isArray(data) ? data.slice(0, 5) : data,
+      success: started,
+      message: started
+        ? "Sincronización automática iniciada"
+        : "La sincronización ya estaba activa",
+      stats: syncService.getStats(),
     });
   } catch (error) {
-    console.error("Error al explorar votación:", error);
+    console.error("Error al iniciar sincronización:", error);
     res.status(500).json({
-      error: "Error al explorar votación",
+      error: "Error al iniciar sincronización",
+      details: error.message,
+    });
+  }
+});
+
+// POST - Detener sincronización automática
+app.post("/api/presidenciales/sync/stop", async (req, res) => {
+  try {
+    const stopped = syncService.stop();
+    res.json({
+      success: stopped,
+      message: stopped
+        ? "Sincronización automática detenida"
+        : "La sincronización no estaba activa",
+      stats: syncService.getStats(),
+    });
+  } catch (error) {
+    console.error("Error al detener sincronización:", error);
+    res.status(500).json({
+      error: "Error al detener sincronización",
+      details: error.message,
+    });
+  }
+});
+
+// GET - Ver estadísticas de sincronización
+app.get("/api/presidenciales/sync/stats", async (req, res) => {
+  try {
+    const stats = syncService.getStats();
+    res.json(stats);
+  } catch (error) {
+    console.error("Error al obtener estadísticas:", error);
+    res.status(500).json({
+      error: "Error al obtener estadísticas",
       details: error.message,
     });
   }
