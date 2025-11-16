@@ -8,6 +8,7 @@ import connectDB from "./config/database.js";
 import Territory from "./models/Territory.js";
 import PresidentialResult from "./models/PresidentialResult.js";
 import Candidate from "./models/Candidate.js";
+import MesaResult from "./models/MesaResult.js";
 import SyncService from "./services/syncService.js";
 
 dotenv.config();
@@ -320,6 +321,68 @@ app.get("/api/presidenciales/candidatos", async (req, res) => {
     console.error("Error al consultar candidatos:", error);
     res.status(500).json({
       error: "Error al consultar candidatos",
+    });
+  }
+});
+
+// GET - Obtener resultados por mesa
+app.get("/api/presidenciales/mesas", async (req, res) => {
+  try {
+    const { region, comuna, local, mesa, instalada } = req.query;
+
+    // Construir filtro dinámico
+    const filter = {};
+    if (region) filter.id_region = parseInt(region);
+    if (comuna) filter.id_comuna = parseInt(comuna);
+    if (local) filter.id_local = parseInt(local);
+    if (mesa) filter.id_mesa = mesa;
+    if (instalada !== undefined) filter.instalada = parseInt(instalada);
+
+    const mesas = await MesaResult.find(filter).lean();
+
+    if (mesas.length === 0) {
+      return res.status(404).json({
+        message: "No se encontraron resultados por mesa. Use POST /api/presidenciales/sync para cargar datos.",
+        count: 0,
+      });
+    }
+
+    res.json({
+      count: mesas.length,
+      data: mesas,
+    });
+  } catch (error) {
+    console.error("Error al consultar mesas:", error);
+    res.status(500).json({
+      error: "Error al consultar resultados por mesa",
+    });
+  }
+});
+
+// GET - Obtener estadísticas de una mesa específica con info de territorio
+app.get("/api/presidenciales/mesas/:id_mesa", async (req, res) => {
+  try {
+    const { id_mesa } = req.params;
+
+    const mesa = await MesaResult.findOne({ id_mesa }).lean();
+
+    if (!mesa) {
+      return res.status(404).json({
+        error: "Mesa no encontrada",
+      });
+    }
+
+    // Obtener información del territorio
+    const territorio = await Territory.findOne({ id_mesa }).lean();
+
+    res.json({
+      mesa,
+      territorio,
+    });
+  } catch (error) {
+    console.error("Error al consultar mesa:", error);
+    res.status(500).json({
+      error: "Error al consultar mesa",
     });
   }
 });
