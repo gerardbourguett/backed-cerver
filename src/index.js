@@ -208,6 +208,116 @@ app.get("/api/resultados/constitucion", async (req, res) => {
   }
 });
 
+// ============= PRESIDENCIALES =============
+
+// GET - Explorar estructura de nómina completa (temporal)
+app.get("/api/presidenciales/nomina/explorar", async (req, res) => {
+  try {
+    const url = `${apiUrl}/nomina_completa_4.zip`;
+    console.log(`Descargando nómina desde ${url}...`);
+
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+      headers: {
+        Accept: "application/zip,application/octet-stream;q=0.9,*/*;q=0.8",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        Referer: "https://elecciones.servel.cl/",
+        Origin: "https://elecciones.servel.cl",
+      },
+    });
+
+    const buffer = Buffer.from(response.data);
+    const zip = new AdmZip(buffer);
+    const zipEntries = zip.getEntries();
+
+    // Listar todos los archivos en el ZIP
+    const fileNames = zipEntries.map((entry) => entry.entryName);
+
+    // Buscar JSON
+    const jsonEntry = zipEntries.find((entry) => entry.entryName.endsWith(".json"));
+
+    if (!jsonEntry) {
+      return res.json({
+        archivos: fileNames,
+        mensaje: "No se encontró archivo JSON en el ZIP",
+      });
+    }
+
+    const jsonContent = zip.readAsText(jsonEntry, "utf8");
+    const data = JSON.parse(jsonContent);
+
+    // Retornar estructura de muestra
+    res.json({
+      archivo: jsonEntry.entryName,
+      total_registros: data.length || "N/A",
+      estructura_ejemplo: Array.isArray(data) ? data[0] : data,
+      primeros_5: Array.isArray(data) ? data.slice(0, 5) : data,
+    });
+  } catch (error) {
+    console.error("Error al explorar nómina:", error);
+    res.status(500).json({
+      error: "Error al explorar nómina",
+      details: error.message,
+    });
+  }
+});
+
+// GET - Explorar estructura de total votación (temporal)
+app.get("/api/presidenciales/votacion/explorar", async (req, res) => {
+  try {
+    const url = `${apiUrl}/total_votacion_4.zip`;
+    console.log(`Descargando votación desde ${url}...`);
+
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+      headers: {
+        Accept: "application/zip,application/octet-stream;q=0.9,*/*;q=0.8",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        Referer: "https://elecciones.servel.cl/",
+        Origin: "https://elecciones.servel.cl",
+      },
+    });
+
+    const buffer = Buffer.from(response.data);
+    const zip = new AdmZip(buffer);
+    const zipEntries = zip.getEntries();
+
+    // Listar todos los archivos en el ZIP
+    const fileNames = zipEntries.map((entry) => entry.entryName);
+
+    // Buscar JSON
+    const jsonEntry = zipEntries.find((entry) => entry.entryName.endsWith(".json"));
+
+    if (!jsonEntry) {
+      return res.json({
+        archivos: fileNames,
+        mensaje: "No se encontró archivo JSON en el ZIP",
+      });
+    }
+
+    const jsonContent = zip.readAsText(jsonEntry, "utf8");
+    const data = JSON.parse(jsonContent);
+
+    // Retornar estructura de muestra
+    res.json({
+      archivo: jsonEntry.entryName,
+      total_registros: data.length || "N/A",
+      estructura_ejemplo: Array.isArray(data) ? data[0] : data,
+      primeros_5: Array.isArray(data) ? data.slice(0, 5) : data,
+    });
+  } catch (error) {
+    console.error("Error al explorar votación:", error);
+    res.status(500).json({
+      error: "Error al explorar votación",
+      details: error.message,
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
