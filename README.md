@@ -289,6 +289,119 @@ Obtiene estadísticas del servicio de sincronización.
 
 ---
 
+### Senadores (Sincronización Automática)
+
+Los endpoints de senadores funcionan de manera idéntica a los presidenciales, pero para la elección de senadores (ID 5).
+
+#### `GET /api/senadores/resultados`
+Consulta resultados senatoriales desde la base de datos.
+
+**Query params (opcionales):**
+- `tipo`: Filtrar por tipo de votación (`"nacional"`, `"extranjero"`)
+
+**Ejemplos:**
+```bash
+# Todos los resultados
+GET /api/senadores/resultados
+
+# Solo resultados nacionales
+GET /api/senadores/resultados?tipo=nacional
+```
+
+**Respuesta:**
+```json
+{
+  "count": 1,
+  "data": [
+    {
+      "name": "Total Votación Nacional",
+      "iteracion": "20251115000000",
+      "id_eleccion": 5,
+      "votosValidos": 4500000,
+      "nulos": 45000,
+      "blancos": 28000,
+      "totalEscrutadas": 28000,
+      "totalVotacion": 4573000,
+      "totalMesas": 40473,
+      "totalInstaladas": 35000,
+      "porc": "69.15",
+      "detalles": [
+        {
+          "name": "LISTA A",
+          "candidatos": [
+            {
+              "id": 51900101,
+              "candidato": "JUAN PEREZ",
+              "sigla_partido": "PDC",
+              "totalVotosCandidatos": 1500000
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### `GET /api/senadores/candidatos`
+Obtiene la lista de todos los candidatos senatoriales.
+
+**Respuesta:**
+```json
+{
+  "count": 15,
+  "data": [
+    {
+      "id": 51900101,
+      "orden": 1,
+      "candidato": "JUAN PEREZ",
+      "sigla_partido": "PDC"
+    }
+  ]
+}
+```
+
+#### `GET /api/senadores/mesas`
+Obtiene resultados por mesa de senadores.
+
+**Query params (opcionales):**
+- `region`: ID de región
+- `comuna`: ID de comuna
+- `local`: ID de local
+- `mesa`: ID de mesa
+- `instalada`: Estado de instalación (0 o 1)
+
+**Ejemplos:**
+```bash
+# Todas las mesas
+GET /api/senadores/mesas
+
+# Filtrar por región
+GET /api/senadores/mesas?region=3015
+
+# Mesas instaladas de una comuna
+GET /api/senadores/mesas?comuna=2822&instalada=1
+```
+
+#### `POST /api/senadores/sync`
+Sincroniza manualmente los datos de senadores desde SERVEL a MongoDB.
+
+**Respuesta:**
+```json
+{
+  "success": true,
+  "message": "Sincronización de senadores iniciada en segundo plano"
+}
+```
+
+#### `POST /api/senadores/sync/totales`
+Sincroniza solo los totales de senadores (rápido).
+
+#### `POST /api/senadores/sync/mesas`
+Sincroniza solo las mesas de senadores (más lento, procesa muchos registros).
+
+---
+
 ## Uso típico
 
 1. **Primera vez**: Cargar territorios en la base de datos
@@ -326,8 +439,11 @@ curl -X POST http://localhost:3000/api/presidenciales/sync/start
 # Ver estadísticas
 curl http://localhost:3000/api/presidenciales/sync/stats
 
-# Consultar resultados actualizados
+# Consultar resultados actualizados de presidenciales
 curl http://localhost:3000/api/presidenciales/resultados?tipo=nacional
+
+# Consultar resultados de senadores
+curl http://localhost:3000/api/senadores/resultados?tipo=nacional
 ```
 
 **4. Detener sincronización (después de la elección):**
@@ -402,7 +518,12 @@ Cuando `ENABLE_SMART_SYNC=true`, el sistema ajusta automáticamente qué datos s
 - **Uso**: Verificar estado de mesas instaladas
 
 **📊 Fase de Conteo (18:00+)**
-- **Qué sincroniza**: Todo (`total_votacion_4.zip`, `nomina_completa_4.zip`, `instalacion.zip`)
+- **Qué sincroniza**: Todo (presidenciales y senadores)
+  - `total_votacion_4.zip` (presidenciales totales)
+  - `nomina_completa_4.zip` (presidenciales por mesa)
+  - `total_votacion_5.zip` (senadores totales)
+  - `nomina_completa_5.zip` (senadores por mesa)
+  - `instalacion.zip` (estado de mesas)
 - **Por qué**: Comienza el escrutinio, los resultados se actualizan constantemente
 - **Uso**: Obtener resultados en tiempo real a medida que se cuentan los votos
 
@@ -469,10 +590,17 @@ ENABLE_SMART_SYNC=false  # Sincronizar todo sin restricciones horarias
 Almacena datos de territorios electorales (regiones, comunas, locales, mesas).
 
 ### `presidential_results`
-Almacena resultados agregados de votación presidencial (nacional, extranjero).
+Almacena resultados agregados de todas las elecciones:
+- Presidenciales (id_eleccion: 4)
+- Senadores (id_eleccion: 5)
 
 ### `candidates`
 Almacena información de candidatos presidenciales.
+
+### `mesa_results`
+Almacena resultados desagregados por mesa de todas las elecciones:
+- Presidenciales (cod_eleccion: 4)
+- Senadores (cod_eleccion: 5)
 
 ---
 

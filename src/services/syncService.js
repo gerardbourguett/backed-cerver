@@ -13,6 +13,11 @@ class SyncService {
     this.lastIteracion = null;
     this.lastIteracionMesas = null;
     this.lastIteracionInstalacion = null;
+
+    // Tracking para senadores (ID 5)
+    this.lastIteracionSenadores = null;
+    this.lastIteracionMesasSenadores = null;
+
     this.syncStats = {
       lastSync: null,
       successCount: 0,
@@ -20,6 +25,8 @@ class SyncService {
       lastError: null,
       lastMesasSync: null,
       lastInstalacionSync: null,
+      lastSenadoresSync: null,
+      lastMesasSenadoresSync: null,
     };
 
     // Configuración de fases electorales (horarios en formato HH:MM, hora de Chile)
@@ -150,10 +157,12 @@ class SyncService {
 
         case "conteo":
           // 18:00+: Todo (conteo de votos)
-          console.log("📊 Fase de conteo: sincronizando todo (totales, mesas, instalación)");
+          console.log("📊 Fase de conteo: sincronizando todo (presidenciales, senadores, mesas, instalación)");
           syncPromises = [
             this.syncTotales(),
             this.syncMesas(),
+            this.syncTotalesSenadores(),
+            this.syncMesasSenadores(),
             this.syncInstalacion(),
           ];
           break;
@@ -175,6 +184,8 @@ class SyncService {
           syncPromises = [
             this.syncTotales(),
             this.syncMesas(),
+            this.syncTotalesSenadores(),
+            this.syncMesasSenadores(),
             this.syncInstalacion(),
           ];
           break;
@@ -192,7 +203,9 @@ class SyncService {
         result = {
           totales: results[0]?.status === "fulfilled" ? results[0].value : { error: results[0]?.reason?.message },
           mesas: results[1]?.status === "fulfilled" ? results[1].value : { error: results[1]?.reason?.message },
-          instalacion: results[2]?.status === "fulfilled" ? results[2].value : { error: results[2]?.reason?.message },
+          senadoresTotales: results[2]?.status === "fulfilled" ? results[2].value : { error: results[2]?.reason?.message },
+          senadoresMesas: results[3]?.status === "fulfilled" ? results[3].value : { error: results[3]?.reason?.message },
+          instalacion: results[4]?.status === "fulfilled" ? results[4].value : { error: results[4]?.reason?.message },
         };
       }
 
@@ -589,6 +602,125 @@ class SyncService {
     };
   }
 
+  // ============= MÉTODOS PARA SENADORES (ID 5) =============
+
+  // Sincronizar totales senadores (total_votacion_5.zip)
+  async syncTotalesSenadores() {
+    const data = await this.fetchElectionData(5); // ID 5 = Senadores
+
+    if (!data || data.length === 0) {
+      return { success: false, message: "No hay datos de senadores disponibles", changed: false };
+    }
+
+    // Verificar si hay cambios usando iteracion
+    const newIteracion = data[0]?.iteracion;
+    if (newIteracion === this.lastIteracionSenadores) {
+      return { success: true, message: "Sin cambios en senadores", changed: false, iteracion: newIteracion };
+    }
+
+    // Hay cambios, actualizar BD
+    const result = await this.updateDatabase(data);
+
+    this.lastIteracionSenadores = newIteracion;
+
+    return {
+      success: true,
+      message: "Totales de senadores actualizados",
+      changed: true,
+      iteracion: newIteracion,
+      ...result,
+    };
+  }
+
+  // Sincronizar resultados por mesa senadores (nomina_completa_5.zip)
+  async syncMesasSenadores() {
+    const data = await this.fetchMesasElectionData(5); // ID 5 = Senadores
+
+    if (!data || data.length === 0) {
+      return { success: false, message: "No hay datos de mesas de senadores disponibles", changed: false };
+    }
+
+    // Verificar si hay cambios usando iteracion
+    const newIteracion = data[0]?.iteracion;
+    if (newIteracion === this.lastIteracionMesasSenadores) {
+      return { success: true, message: "Sin cambios en mesas de senadores", changed: false, iteracion: newIteracion };
+    }
+
+    // Hay cambios, actualizar BD
+    const result = await this.updateMesasDatabase(data);
+
+    this.lastIteracionMesasSenadores = newIteracion;
+    this.syncStats.lastMesasSenadoresSync = new Date();
+
+    return {
+      success: true,
+      message: "Mesas de senadores actualizadas",
+      changed: true,
+      iteracion: newIteracion,
+      ...result,
+    };
+  }
+
+  // Método genérico para descargar datos de cualquier elección
+  async fetchElectionData(electionId) {
+    const url = `${this.apiUrl}/total_votacion_${electionId}.zip`;
+
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+      headers: {
+        Accept: "application/zip,application/octet-stream;q=0.9,*/*;q=0.8",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        Referer: "https://elecciones.servel.cl/",
+        Origin: "https://elecciones.servel.cl",
+      },
+    });
+
+    const buffer = Buffer.from(response.data);
+    const zip = new AdmZip(buffer);
+    const zipEntries = zip.getEntries();
+
+    const jsonEntry = zipEntries.find((entry) => entry.entryName.endsWith(".json"));
+
+    if (!jsonEntry) {
+      throw new Error(`Archivo JSON no encontrado en total_votacion_${electionId}.zip`);
+    }
+
+    const jsonContent = zip.readAsText(jsonEntry, "utf8");
+    return JSON.parse(jsonContent);
+  }
+
+  // Método genérico para descargar datos de mesas de cualquier elección
+  async fetchMesasElectionData(electionId) {
+    const url = `${this.apiUrl}/nomina_completa_${electionId}.zip`;
+
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 60000, // Más tiempo porque es un archivo grande
+      headers: {
+        Accept: "application/zip,application/octet-stream;q=0.9,*/*;q=0.8",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        Referer: "https://elecciones.servel.cl/",
+        Origin: "https://elecciones.servel.cl",
+      },
+    });
+
+    const buffer = Buffer.from(response.data);
+    const zip = new AdmZip(buffer);
+    const zipEntries = zip.getEntries();
+
+    const jsonEntry = zipEntries.find((entry) => entry.entryName.endsWith(".json"));
+
+    if (!jsonEntry) {
+      throw new Error(`Archivo JSON no encontrado en nomina_completa_${electionId}.zip`);
+    }
+
+    const jsonContent = zip.readAsText(jsonEntry, "utf8");
+    return JSON.parse(jsonContent);
+  }
+
   // Obtener estadísticas
   getStats() {
     return {
@@ -597,6 +729,8 @@ class SyncService {
       lastIteracion: this.lastIteracion,
       lastIteracionMesas: this.lastIteracionMesas,
       lastIteracionInstalacion: this.lastIteracionInstalacion,
+      lastIteracionSenadores: this.lastIteracionSenadores,
+      lastIteracionMesasSenadores: this.lastIteracionMesasSenadores,
       smartSync: {
         enabled: this.enableSmartSync,
         currentPhase: this.getCurrentElectoralPhase(),
