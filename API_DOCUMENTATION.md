@@ -438,9 +438,12 @@ Los endpoints de resultados por circunscripción/distrito muestran candidatos el
 - Sincronizaciones subsecuentes son paralelas
 
 ### Fases Electorales (Smart Sync)
-- **Instalación** (08:00-12:00): Solo sincroniza instalacion.zip
-- **Votación** (12:00-18:00): Solo sincroniza instalacion.zip
-- **Conteo** (18:00+): Sincroniza todo (7 archivos)
+- **Instalación** (08:00-12:00): No sincroniza (espera fase de conteo)
+- **Votación** (12:00-18:00): No sincroniza (espera fase de conteo)
+- **Conteo** (18:00+): Sincroniza todo en orden (6 archivos):
+  1. Presidenciales totales y mesas
+  2. Senadores totales y mesas
+  3. Diputados totales y mesas
 
 ### Estructura de Datos
 - **Presidenciales**: ID elección 4
