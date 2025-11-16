@@ -296,28 +296,49 @@ class SyncService {
 
   // Actualizar base de datos con resultados por mesa
   async updateMesasDatabase(data) {
-    console.log(`Procesando ${data.length} registros de mesas...`);
+    console.log(`Procesando ${data.length} registros de mesas en lotes...`);
 
-    // Usar bulkWrite para mejor rendimiento
-    const bulkOps = data.map((mesa) => ({
-      updateOne: {
-        filter: { id_mesa: mesa.id_mesa },
-        update: { $set: mesa },
-        upsert: true,
-      },
-    }));
+    const BATCH_SIZE = 1000; // Procesar 1000 registros a la vez
+    let totalInserted = 0;
+    let totalModified = 0;
 
-    const result = await MesaResult.bulkWrite(bulkOps, { ordered: false });
+    // Dividir en lotes para evitar out of memory
+    for (let i = 0; i < data.length; i += BATCH_SIZE) {
+      const batch = data.slice(i, i + BATCH_SIZE);
+      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(data.length / BATCH_SIZE);
+
+      console.log(`Procesando lote ${batchNumber}/${totalBatches} (${batch.length} registros)...`);
+
+      const bulkOps = batch.map((mesa) => ({
+        updateOne: {
+          filter: { id_mesa: mesa.id_mesa },
+          update: { $set: mesa },
+          upsert: true,
+        },
+      }));
+
+      try {
+        const result = await MesaResult.bulkWrite(bulkOps, { ordered: false });
+        totalInserted += result.upsertedCount;
+        totalModified += result.modifiedCount;
+
+        console.log(`Lote ${batchNumber}/${totalBatches} completado: ${result.upsertedCount} insertados, ${result.modifiedCount} actualizados`);
+      } catch (error) {
+        console.error(`Error en lote ${batchNumber}:`, error.message);
+        // Continuar con el siguiente lote aunque este falle
+      }
+    }
 
     console.log("Resultados por mesa actualizados:", {
-      insertados: result.upsertedCount,
-      actualizados: result.modifiedCount,
+      insertados: totalInserted,
+      actualizados: totalModified,
       total: data.length,
     });
 
     return {
-      insertados: result.upsertedCount,
-      actualizados: result.modifiedCount,
+      insertados: totalInserted,
+      actualizados: totalModified,
       total: data.length,
     };
   }
