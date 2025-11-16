@@ -25,6 +25,12 @@ MONGODB_URI=mongodb://localhost:27017/servel
 # Sincronización automática (opcional)
 AUTO_START_SYNC=false      # true para iniciar sync automáticamente al arrancar
 SYNC_INTERVAL=60000        # Intervalo en milisegundos (60000 = 1 minuto)
+
+# Sincronización inteligente basada en fases electorales
+ENABLE_SMART_SYNC=true     # true para habilitar sincronización inteligente por fase
+INSTALACION_START_HOUR=08:00  # Inicio de instalación de mesas
+INSTALACION_END_HOUR=12:00    # Fin de instalación / inicio de votación
+VOTACION_END_HOUR=18:00       # Fin de votación / inicio de conteo
 ```
 
 3. Asegurarse de tener MongoDB ejecutándose localmente o usar MongoDB Atlas:
@@ -261,10 +267,20 @@ Obtiene estadísticas del servicio de sincronización.
   "isRunning": true,
   "syncInterval": 60000,
   "lastIteracion": "20251115120000",
+  "lastIteracionMesas": "20251115120000",
+  "lastIteracionInstalacion": "20251115120000",
+  "smartSync": {
+    "enabled": true,
+    "currentPhase": "conteo",
+    "instalacionHours": "08:00-12:00",
+    "votacionEndHour": "18:00"
+  },
   "lastSync": "2025-11-15T12:00:00.000Z",
   "successCount": 10,
   "errorCount": 0,
-  "lastError": null
+  "lastError": null,
+  "lastMesasSync": "2025-11-15T12:00:00.000Z",
+  "lastInstalacionSync": "2025-11-15T12:00:00.000Z"
 }
 ```
 
@@ -364,6 +380,40 @@ El servicio de sincronización automática:
 3. **Actualización incremental**: Solo actualiza MongoDB si detecta cambios reales
 4. **Optimización**: Usa `bulkWrite` para máxima eficiencia
 5. **Monitoreo**: Registra estadísticas de sincronización (éxitos, errores, última actualización)
+6. **Sincronización por fases**: Ajusta automáticamente qué sincronizar según la hora del día
+
+### Sincronización Inteligente por Fases Electorales
+
+Cuando `ENABLE_SMART_SYNC=true`, el sistema ajusta automáticamente qué datos sincronizar según la fase electoral:
+
+#### Fases del Día Electoral
+
+**📍 Fase de Instalación (08:00-12:00)**
+- **Qué sincroniza**: Solo `instalacion.zip`
+- **Por qué**: Las mesas se están instalando, los datos de votos aún no existen
+- **Uso**: Monitorear el progreso de instalación de mesas en tiempo real
+
+**🗳️ Fase de Votación (12:00-18:00)**
+- **Qué sincroniza**: Solo `instalacion.zip`
+- **Por qué**: Votación en curso, los resultados no se publican hasta el cierre
+- **Uso**: Verificar estado de mesas instaladas
+
+**📊 Fase de Conteo (18:00+)**
+- **Qué sincroniza**: Todo (`total_votacion_4.zip`, `nomina_completa_4.zip`, `instalacion.zip`)
+- **Por qué**: Comienza el escrutinio, los resultados se actualizan constantemente
+- **Uso**: Obtener resultados en tiempo real a medida que se cuentan los votos
+
+**⏸️ Fuera de Horario (antes de 08:00)**
+- **Qué sincroniza**: Nada
+- **Por qué**: No hay actividad electoral
+- **Uso**: Conservar recursos
+
+#### Ventajas de Smart Sync
+
+- ✅ **Eficiencia**: No descarga datos innecesarios (ej: resultados antes de las 18:00)
+- ✅ **Precisión**: Sincroniza lo relevante para cada momento del día electoral
+- ✅ **Recursos**: Reduce carga en servidor y bandwidth
+- ✅ **Flexibilidad**: Horarios configurables vía variables de entorno
 
 ### Características clave
 
@@ -380,18 +430,31 @@ El servicio de sincronización automática:
 ```env
 AUTO_START_SYNC=false
 SYNC_INTERVAL=60000  # 1 minuto
+ENABLE_SMART_SYNC=false  # Sincronizar todo siempre
 ```
 
-**Para día de elección:**
+**Para día de elección (RECOMENDADO):**
 ```env
 AUTO_START_SYNC=true
 SYNC_INTERVAL=30000  # 30 segundos
+ENABLE_SMART_SYNC=true  # Activar sincronización por fases
+INSTALACION_START_HOUR=08:00
+INSTALACION_END_HOUR=12:00
+VOTACION_END_HOUR=18:00
 ```
 
 **Para después de la elección (modo archivo):**
 ```env
 AUTO_START_SYNC=false
 SYNC_INTERVAL=300000  # 5 minutos
+ENABLE_SMART_SYNC=false  # Sincronizar todo
+```
+
+**Para pruebas de resultados (simular fase de conteo):**
+```env
+AUTO_START_SYNC=true
+SYNC_INTERVAL=30000  # 30 segundos
+ENABLE_SMART_SYNC=false  # Sincronizar todo sin restricciones horarias
 ```
 
 ---

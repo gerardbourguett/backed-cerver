@@ -21,6 +21,12 @@ class SyncService {
       lastMesasSync: null,
       lastInstalacionSync: null,
     };
+
+    // Configuración de fases electorales (horarios en formato HH:MM, hora de Chile)
+    this.instalacionStart = process.env.INSTALACION_START_HOUR || "08:00";
+    this.instalacionEnd = process.env.INSTALACION_END_HOUR || "12:00";
+    this.votacionEnd = process.env.VOTACION_END_HOUR || "18:00";
+    this.enableSmartSync = process.env.ENABLE_SMART_SYNC === "true";
   }
 
   // Iniciar sincronización automática
@@ -62,30 +68,116 @@ class SyncService {
     return true;
   }
 
+  // Determinar fase electoral actual según hora de Chile
+  getCurrentElectoralPhase() {
+    if (!this.enableSmartSync) {
+      return "all"; // Si smart sync está deshabilitado, sincronizar todo
+    }
+
+    // Obtener hora actual en Chile (UTC-3)
+    const now = new Date();
+    const chileTime = new Date(now.toLocaleString("en-US", { timeZone: "America/Santiago" }));
+    const currentHour = chileTime.getHours();
+    const currentMinute = chileTime.getMinutes();
+    const currentTimeStr = `${currentHour.toString().padStart(2, "0")}:${currentMinute.toString().padStart(2, "0")}`;
+
+    const [instStartHour, instStartMin] = this.instalacionStart.split(":").map(Number);
+    const [instEndHour, instEndMin] = this.instalacionEnd.split(":").map(Number);
+    const [votEndHour, votEndMin] = this.votacionEnd.split(":").map(Number);
+
+    const currentMinutes = currentHour * 60 + currentMinute;
+    const instStartMinutes = instStartHour * 60 + instStartMin;
+    const instEndMinutes = instEndHour * 60 + instEndMin;
+    const votEndMinutes = votEndHour * 60 + votEndMin;
+
+    if (currentMinutes >= instStartMinutes && currentMinutes < instEndMinutes) {
+      return "instalacion"; // 08:00-12:00: Solo instalación
+    } else if (currentMinutes >= instEndMinutes && currentMinutes < votEndMinutes) {
+      return "votacion"; // 12:00-18:00: Período de votación
+    } else if (currentMinutes >= votEndMinutes) {
+      return "conteo"; // 18:00+: Conteo de votos
+    } else {
+      return "none"; // Antes de las 08:00: Sin sincronización
+    }
+  }
+
   // Sincronizar ahora (manualmente)
   async syncNow() {
     try {
-      console.log(`🔄 [${new Date().toISOString()}] Sincronizando datos presidenciales...`);
+      const phase = this.getCurrentElectoralPhase();
+      console.log(`🔄 [${new Date().toISOString()}] Sincronizando datos presidenciales... (Fase: ${phase})`);
 
-      // Sincronizar totales, mesas e instalación en paralelo
-      const [totalesResult, mesasResult, instalacionResult] = await Promise.allSettled([
-        this.syncTotales(),
-        this.syncMesas(),
-        this.syncInstalacion(),
-      ]);
+      let syncPromises = [];
+      let result = {};
 
-      const result = {
-        totales: totalesResult.status === "fulfilled" ? totalesResult.value : { error: totalesResult.reason?.message },
-        mesas: mesasResult.status === "fulfilled" ? mesasResult.value : { error: mesasResult.reason?.message },
-        instalacion: instalacionResult.status === "fulfilled" ? instalacionResult.value : { error: instalacionResult.reason?.message },
-      };
+      // Determinar qué sincronizar según la fase electoral
+      switch (phase) {
+        case "instalacion":
+          // 08:00-12:00: Solo instalación (mesas se están instalando)
+          console.log("📍 Fase de instalación: sincronizando solo instalacion.zip");
+          syncPromises = [this.syncInstalacion()];
+          break;
+
+        case "votacion":
+          // 12:00-18:00: Solo instalación con baja frecuencia (votación en curso)
+          console.log("🗳️  Fase de votación: sincronizando solo instalacion.zip");
+          syncPromises = [this.syncInstalacion()];
+          break;
+
+        case "conteo":
+          // 18:00+: Todo (conteo de votos)
+          console.log("📊 Fase de conteo: sincronizando todo (totales, mesas, instalación)");
+          syncPromises = [
+            this.syncTotales(),
+            this.syncMesas(),
+            this.syncInstalacion(),
+          ];
+          break;
+
+        case "none":
+          // Antes de las 08:00: No sincronizar
+          console.log("⏸️  Fuera del horario electoral: sin sincronización");
+          return {
+            success: true,
+            message: "Fuera del horario electoral",
+            changed: false,
+            phase,
+          };
+
+        case "all":
+        default:
+          // Smart sync deshabilitado: sincronizar todo
+          console.log("🔄 Smart sync deshabilitado: sincronizando todo");
+          syncPromises = [
+            this.syncTotales(),
+            this.syncMesas(),
+            this.syncInstalacion(),
+          ];
+          break;
+      }
+
+      // Ejecutar sincronizaciones en paralelo
+      const results = await Promise.allSettled(syncPromises);
+
+      // Procesar resultados según la fase
+      if (phase === "instalacion" || phase === "votacion") {
+        result = {
+          instalacion: results[0].status === "fulfilled" ? results[0].value : { error: results[0].reason?.message },
+        };
+      } else {
+        result = {
+          totales: results[0]?.status === "fulfilled" ? results[0].value : { error: results[0]?.reason?.message },
+          mesas: results[1]?.status === "fulfilled" ? results[1].value : { error: results[1]?.reason?.message },
+          instalacion: results[2]?.status === "fulfilled" ? results[2].value : { error: results[2]?.reason?.message },
+        };
+      }
 
       this.syncStats.lastSync = new Date();
 
-      const hasChanges =
-        (totalesResult.status === "fulfilled" && totalesResult.value.changed) ||
-        (mesasResult.status === "fulfilled" && mesasResult.value.changed) ||
-        (instalacionResult.status === "fulfilled" && instalacionResult.value.changed);
+      // Verificar si hubo cambios
+      const hasChanges = results.some(
+        (r) => r.status === "fulfilled" && r.value.changed
+      );
 
       if (hasChanges) {
         this.syncStats.successCount++;
@@ -97,6 +189,7 @@ class SyncService {
         success: true,
         message: hasChanges ? "Datos actualizados" : "Sin cambios",
         changed: hasChanges,
+        phase,
         ...result,
       };
     } catch (error) {
@@ -471,6 +564,12 @@ class SyncService {
       lastIteracion: this.lastIteracion,
       lastIteracionMesas: this.lastIteracionMesas,
       lastIteracionInstalacion: this.lastIteracionInstalacion,
+      smartSync: {
+        enabled: this.enableSmartSync,
+        currentPhase: this.getCurrentElectoralPhase(),
+        instalacionHours: `${this.instalacionStart}-${this.instalacionEnd}`,
+        votacionEndHour: this.votacionEnd,
+      },
       ...this.syncStats,
     };
   }
