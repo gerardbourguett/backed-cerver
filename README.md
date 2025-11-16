@@ -487,14 +487,14 @@ curl http://localhost:3000/api/territorios/nacional?comuna=2822
 curl -X POST http://localhost:3000/api/territorios/nacional/cargar
 ```
 
-**2. Día de la elección - Iniciar sincronización automática:**
+**2. Día de la elección - Iniciar sincronización manual (recomendado):**
 ```bash
-# Opción A: Configurar auto-inicio en .env
-AUTO_START_SYNC=true
-SYNC_INTERVAL=30000  # 30 segundos para actualizaciones más frecuentes
-
-# Opción B: Iniciar manualmente
+# Iniciar sincronización manualmente (evita saturar el sistema)
 curl -X POST http://localhost:3000/api/presidenciales/sync/start
+
+# Configuración en .env
+AUTO_START_SYNC=false  # false para control manual (recomendado)
+SYNC_INTERVAL=30000  # 30 segundos para actualizaciones frecuentes
 ```
 
 **3. Monitorear sincronización:**
@@ -629,13 +629,14 @@ ENABLE_SMART_SYNC=false  # Sincronizar todo siempre
 
 **Para día de elección (RECOMENDADO):**
 ```env
-AUTO_START_SYNC=true
+AUTO_START_SYNC=false  # Iniciar manualmente para evitar saturar el sistema
 SYNC_INTERVAL=30000  # 30 segundos
 ENABLE_SMART_SYNC=true  # Activar sincronización por fases
 INSTALACION_START_HOUR=08:00
 INSTALACION_END_HOUR=12:00
 VOTACION_END_HOUR=18:00
 ```
+*Iniciar con: `POST /api/presidenciales/sync/start`*
 
 **Para después de la elección (modo archivo):**
 ```env
@@ -643,13 +644,15 @@ AUTO_START_SYNC=false
 SYNC_INTERVAL=300000  # 5 minutos
 ENABLE_SMART_SYNC=false  # Sincronizar todo
 ```
+*Iniciar manualmente si se necesitan actualizaciones*
 
 **Para pruebas de resultados (simular fase de conteo):**
 ```env
-AUTO_START_SYNC=true
+AUTO_START_SYNC=false  # Control manual recomendado
 SYNC_INTERVAL=30000  # 30 segundos
 ENABLE_SMART_SYNC=false  # Sincronizar todo sin restricciones horarias
 ```
+*Iniciar con: `POST /api/presidenciales/sync/start`*
 
 ---
 
@@ -691,8 +694,8 @@ PORT=3000
 API_URL=https://elecciones.servel.cl
 MONGODB_URI=mongodb+srv://usuario:password@cluster.mongodb.net/servel
 
-# Sincronización automática (DÍA DE LA ELECCIÓN)
-AUTO_START_SYNC=true
+# Sincronización manual (evita saturar el sistema)
+AUTO_START_SYNC=false
 SYNC_INTERVAL=30000
 
 # Sincronización inteligente
@@ -702,6 +705,8 @@ INSTALACION_END_HOUR=12:00
 VOTACION_END_HOUR=18:00
 INSTALACION_COMPLETE_THRESHOLD=99.5
 ```
+
+**Nota:** Iniciar sincronización manualmente con `POST /api/presidenciales/sync/start` cuando sea necesario.
 
 ### Auto-Deploy desde GitHub
 
@@ -722,17 +727,20 @@ git push origin main
 2. Descarga el código actualizado
 3. Ejecuta `npm install` (si package.json cambió)
 4. Reinicia el servidor con el nuevo código
-5. Si `AUTO_START_SYNC=true`, la sincronización inicia automáticamente
+5. La sincronización está configurada como manual (AUTO_START_SYNC=false) para evitar saturar el sistema
 
-### Verificar que la Sincronización Está Activa
+### Sincronización Manual
 
-Después del deploy, verifica que todo funciona:
+Después del deploy, puedes iniciar la sincronización manualmente cuando lo necesites:
 
 ```bash
+# Iniciar sincronización automática
+curl -X POST https://tu-app.railway.app/api/presidenciales/sync/start
+
 # Ver estadísticas de sincronización
 curl https://tu-app.railway.app/api/presidenciales/sync/stats
 
-# Deberías ver:
+# Si está corriendo, deberías ver:
 {
   "isRunning": true,
   "smartSync": {
@@ -741,6 +749,9 @@ curl https://tu-app.railway.app/api/presidenciales/sync/stats
     "instalacionCompleta": false
   }
 }
+
+# Detener sincronización cuando no sea necesaria
+curl -X POST https://tu-app.railway.app/api/presidenciales/sync/stop
 ```
 
 ### Monitoreo en Tiempo Real
@@ -773,10 +784,14 @@ A partir de ese momento, **deja de sincronizar instalacion.zip** durante las fas
 
 ### Troubleshooting
 
-**Si la sincronización no inicia automáticamente:**
-1. Verificar que `AUTO_START_SYNC=true` en Railway
-2. Revisar logs para errores de conexión a MongoDB
-3. Verificar que `MONGODB_URI` es correcta
+**Para iniciar la sincronización manualmente:**
+1. Usar el endpoint `POST /api/presidenciales/sync/start`
+2. Verificar con `GET /api/presidenciales/sync/stats` que isRunning=true
+3. Detener con `POST /api/presidenciales/sync/stop` cuando no sea necesaria
+
+**Si hay errores al sincronizar:**
+1. Revisar logs para errores de conexión a MongoDB
+2. Verificar que `MONGODB_URI` es correcta
 
 **Si hay errores de MongoDB:**
 1. Asegúrate de usar MongoDB Atlas (no local)
