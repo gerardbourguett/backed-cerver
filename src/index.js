@@ -734,6 +734,177 @@ app.post("/api/senadores/sync/mesas", async (req, res) => {
   }
 });
 
+// ============= DIPUTADOS =============
+
+// GET - Obtener resultados de diputados desde BD
+app.get("/api/diputados/resultados", async (req, res) => {
+  try {
+    const { tipo } = req.query; // "nacional", "extranjero", o vacío para todos
+
+    const filter = { id_eleccion: 6 }; // ID 6 = Diputados
+    if (tipo) {
+      filter.name = new RegExp(tipo, "i");
+    }
+
+    const resultados = await PresidentialResult.find(filter)
+      .sort({ iteracion: -1 })
+      .lean();
+
+    if (resultados.length === 0) {
+      return res.status(404).json({
+        message: "No se encontraron resultados de diputados. Use POST /api/diputados/sync para cargar datos.",
+        count: 0,
+      });
+    }
+
+    res.json({
+      count: resultados.length,
+      data: resultados,
+    });
+  } catch (error) {
+    console.error("Error al consultar resultados de diputados:", error);
+    res.status(500).json({
+      error: "Error al consultar resultados de diputados",
+    });
+  }
+});
+
+// GET - Obtener candidatos de diputados
+app.get("/api/diputados/candidatos", async (req, res) => {
+  try {
+    // Obtener todos los resultados de diputados para extraer candidatos
+    const resultados = await PresidentialResult.find({ id_eleccion: 6 }).lean();
+
+    if (resultados.length === 0) {
+      return res.status(404).json({
+        message: "No se encontraron candidatos de diputados. Use POST /api/diputados/sync para cargar datos.",
+        count: 0,
+      });
+    }
+
+    // Extraer candidatos únicos de los detalles
+    const candidatosMap = new Map();
+    for (const resultado of resultados) {
+      if (resultado.detalles) {
+        for (const detalle of resultado.detalles) {
+          if (detalle.candidatos) {
+            for (const candidato of detalle.candidatos) {
+              if (!candidatosMap.has(candidato.id)) {
+                candidatosMap.set(candidato.id, candidato);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    const candidatos = Array.from(candidatosMap.values()).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+
+    res.json({
+      count: candidatos.length,
+      data: candidatos,
+    });
+  } catch (error) {
+    console.error("Error al consultar candidatos de diputados:", error);
+    res.status(500).json({
+      error: "Error al consultar candidatos de diputados",
+    });
+  }
+});
+
+// GET - Obtener resultados por mesa de diputados
+app.get("/api/diputados/mesas", async (req, res) => {
+  try {
+    const { region, comuna, local, mesa, instalada } = req.query;
+
+    // Construir filtro dinámico
+    const filter = { cod_eleccion: 6 }; // ID 6 = Diputados
+    if (region) filter.id_region = parseInt(region);
+    if (comuna) filter.id_comuna = parseInt(comuna);
+    if (local) filter.id_local = parseInt(local);
+    if (mesa) filter.id_mesa = mesa;
+    if (instalada !== undefined) filter.instalada = parseInt(instalada);
+
+    const mesas = await MesaResult.find(filter).lean();
+
+    if (mesas.length === 0) {
+      return res.status(404).json({
+        message: "No se encontraron resultados por mesa de diputados. Use POST /api/diputados/sync para cargar datos.",
+        count: 0,
+      });
+    }
+
+    res.json({
+      count: mesas.length,
+      data: mesas,
+    });
+  } catch (error) {
+    console.error("Error al consultar mesas de diputados:", error);
+    res.status(500).json({
+      error: "Error al consultar resultados por mesa de diputados",
+    });
+  }
+});
+
+// POST - Sincronizar diputados manualmente
+app.post("/api/diputados/sync", async (req, res) => {
+  try {
+    // Iniciar sincronización pero no esperar a que termine
+    Promise.all([
+      syncService.syncTotalesDiputados(),
+      syncService.syncMesasDiputados()
+    ]).catch((error) => {
+      console.error("Error en sincronización de diputados:", error);
+    });
+
+    res.json({
+      success: true,
+      message: "Sincronización de diputados iniciada en segundo plano. Use GET /api/presidenciales/sync/stats para ver el progreso.",
+    });
+  } catch (error) {
+    console.error("Error al iniciar sincronización de diputados:", error);
+    res.status(500).json({
+      error: "Error al iniciar sincronización de diputados",
+      details: error.message,
+    });
+  }
+});
+
+// POST - Sincronizar solo totales diputados
+app.post("/api/diputados/sync/totales", async (req, res) => {
+  try {
+    const result = await syncService.syncTotalesDiputados();
+    res.json(result);
+  } catch (error) {
+    console.error("Error en sincronización de totales de diputados:", error);
+    res.status(500).json({
+      error: "Error en sincronización de totales de diputados",
+      details: error.message,
+    });
+  }
+});
+
+// POST - Sincronizar solo mesas diputados
+app.post("/api/diputados/sync/mesas", async (req, res) => {
+  try {
+    // Iniciar sincronización en segundo plano
+    syncService.syncMesasDiputados().catch((error) => {
+      console.error("Error en sincronización de mesas de diputados:", error);
+    });
+
+    res.json({
+      success: true,
+      message: "Sincronización de mesas de diputados iniciada en segundo plano. Use GET /api/presidenciales/sync/stats para ver el progreso.",
+    });
+  } catch (error) {
+    console.error("Error al iniciar sincronización de mesas de diputados:", error);
+    res.status(500).json({
+      error: "Error al iniciar sincronización de mesas de diputados",
+      details: error.message,
+    });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });

@@ -402,6 +402,69 @@ Sincroniza solo las mesas de senadores (más lento, procesa muchos registros).
 
 ---
 
+### Diputados (Sincronización Automática)
+
+Los endpoints de diputados funcionan de manera idéntica a los presidenciales y senadores, pero para la elección de diputados (ID 6).
+
+#### `GET /api/diputados/resultados`
+Consulta resultados de diputados desde la base de datos.
+
+**Query params (opcionales):**
+- `tipo`: Filtrar por tipo de votación (`"nacional"`, `"extranjero"`)
+
+**Ejemplos:**
+```bash
+# Todos los resultados
+GET /api/diputados/resultados
+
+# Solo resultados nacionales
+GET /api/diputados/resultados?tipo=nacional
+```
+
+#### `GET /api/diputados/candidatos`
+Obtiene la lista de todos los candidatos de diputados.
+
+#### `GET /api/diputados/mesas`
+Obtiene resultados por mesa de diputados.
+
+**Query params (opcionales):**
+- `region`: ID de región
+- `comuna`: ID de comuna
+- `local`: ID de local
+- `mesa`: ID de mesa
+- `instalada`: Estado de instalación (0 o 1)
+
+**Ejemplos:**
+```bash
+# Todas las mesas
+GET /api/diputados/mesas
+
+# Filtrar por región
+GET /api/diputados/mesas?region=3015
+
+# Mesas instaladas de una comuna
+GET /api/diputados/mesas?comuna=2822&instalada=1
+```
+
+#### `POST /api/diputados/sync`
+Sincroniza manualmente los datos de diputados desde SERVEL a MongoDB.
+
+**Respuesta:**
+```json
+{
+  "success": true,
+  "message": "Sincronización de diputados iniciada en segundo plano"
+}
+```
+
+#### `POST /api/diputados/sync/totales`
+Sincroniza solo los totales de diputados (rápido).
+
+#### `POST /api/diputados/sync/mesas`
+Sincroniza solo las mesas de diputados (más lento, procesa muchos registros).
+
+---
+
 ## Uso típico
 
 1. **Primera vez**: Cargar territorios en la base de datos
@@ -444,6 +507,9 @@ curl http://localhost:3000/api/presidenciales/resultados?tipo=nacional
 
 # Consultar resultados de senadores
 curl http://localhost:3000/api/senadores/resultados?tipo=nacional
+
+# Consultar resultados de diputados
+curl http://localhost:3000/api/diputados/resultados?tipo=nacional
 ```
 
 **4. Detener sincronización (después de la elección):**
@@ -518,11 +584,13 @@ Cuando `ENABLE_SMART_SYNC=true`, el sistema ajusta automáticamente qué datos s
 - **Uso**: Verificar estado de mesas instaladas
 
 **📊 Fase de Conteo (18:00+)**
-- **Qué sincroniza**: Todo (presidenciales y senadores)
+- **Qué sincroniza**: Todo (presidenciales, senadores y diputados)
   - `total_votacion_4.zip` (presidenciales totales)
   - `nomina_completa_4.zip` (presidenciales por mesa)
   - `total_votacion_5.zip` (senadores totales)
   - `nomina_completa_5.zip` (senadores por mesa)
+  - `total_votacion_6.zip` (diputados totales)
+  - `nomina_completa_6.zip` (diputados por mesa)
   - `instalacion.zip` (estado de mesas)
 - **Por qué**: Comienza el escrutinio, los resultados se actualizan constantemente
 - **Uso**: Obtener resultados en tiempo real a medida que se cuentan los votos
@@ -593,6 +661,7 @@ Almacena datos de territorios electorales (regiones, comunas, locales, mesas).
 Almacena resultados agregados de todas las elecciones:
 - Presidenciales (id_eleccion: 4)
 - Senadores (id_eleccion: 5)
+- Diputados (id_eleccion: 6)
 
 ### `candidates`
 Almacena información de candidatos presidenciales.
@@ -601,6 +670,7 @@ Almacena información de candidatos presidenciales.
 Almacena resultados desagregados por mesa de todas las elecciones:
 - Presidenciales (cod_eleccion: 4)
 - Senadores (cod_eleccion: 5)
+- Diputados (cod_eleccion: 6)
 
 ---
 
