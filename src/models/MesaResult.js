@@ -39,6 +39,11 @@ const mesaResultSchema = new mongoose.Schema(
     envio: { type: String },
     instalada: { type: Number, index: true }, // 0 = no, 1 = sí
 
+    // Datos de instalación (de instalacion.zip)
+    vocales: { type: String },
+    hora_instalacion: { type: String },
+    hora_actualizacion: { type: String },
+
     // Resultados
     blancos: { type: Number },
     nulos: { type: Number },

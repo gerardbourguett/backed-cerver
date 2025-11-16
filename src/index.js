@@ -488,6 +488,27 @@ app.post("/api/presidenciales/sync/mesas", async (req, res) => {
   }
 });
 
+// POST - Sincronizar solo instalación (~40K registros, rápido porque solo actualiza)
+app.post("/api/presidenciales/sync/instalacion", async (req, res) => {
+  try {
+    // Iniciar sincronización en segundo plano
+    syncService.syncInstalacion().catch((error) => {
+      console.error("Error en sincronización de instalación:", error);
+    });
+
+    res.json({
+      success: true,
+      message: "Sincronización de instalación iniciada en segundo plano. Use GET /api/presidenciales/sync/stats para ver el progreso.",
+    });
+  } catch (error) {
+    console.error("Error al iniciar sincronización de instalación:", error);
+    res.status(500).json({
+      error: "Error al iniciar sincronización de instalación",
+      details: error.message,
+    });
+  }
+});
+
 // POST - Iniciar sincronización automática
 app.post("/api/presidenciales/sync/start", async (req, res) => {
   try {

@@ -12,13 +12,25 @@ class SyncService {
     this.syncInterval = parseInt(process.env.SYNC_INTERVAL || "60000"); // Default: 60 segundos
     this.lastIteracion = null;
     this.lastIteracionMesas = null;
+    this.lastIteracionInstalacion = null;
     this.syncStats = {
       lastSync: null,
       successCount: 0,
       errorCount: 0,
       lastError: null,
       lastMesasSync: null,
+      lastInstalacionSync: null,
     };
+
+    // Configuración de fases electorales (horarios en formato HH:MM, hora de Chile)
+    this.instalacionStart = process.env.INSTALACION_START_HOUR || "08:00";
+    this.instalacionEnd = process.env.INSTALACION_END_HOUR || "12:00";
+    this.votacionEnd = process.env.VOTACION_END_HOUR || "18:00";
+    this.enableSmartSync = process.env.ENABLE_SMART_SYNC === "true";
+
+    // Flag para indicar si ya se alcanzó el 100% de instalación
+    this.instalacionCompleta = false;
+    this.instalacionCompletaThreshold = parseFloat(process.env.INSTALACION_COMPLETE_THRESHOLD || "99.5"); // 99.5% por defecto
   }
 
   // Iniciar sincronización automática
@@ -60,27 +72,136 @@ class SyncService {
     return true;
   }
 
+  // Determinar fase electoral actual según hora de Chile
+  getCurrentElectoralPhase() {
+    if (!this.enableSmartSync) {
+      return "all"; // Si smart sync está deshabilitado, sincronizar todo
+    }
+
+    // Obtener hora actual en Chile (UTC-3)
+    const now = new Date();
+    const chileTime = new Date(now.toLocaleString("en-US", { timeZone: "America/Santiago" }));
+    const currentHour = chileTime.getHours();
+    const currentMinute = chileTime.getMinutes();
+    const currentTimeStr = `${currentHour.toString().padStart(2, "0")}:${currentMinute.toString().padStart(2, "0")}`;
+
+    const [instStartHour, instStartMin] = this.instalacionStart.split(":").map(Number);
+    const [instEndHour, instEndMin] = this.instalacionEnd.split(":").map(Number);
+    const [votEndHour, votEndMin] = this.votacionEnd.split(":").map(Number);
+
+    const currentMinutes = currentHour * 60 + currentMinute;
+    const instStartMinutes = instStartHour * 60 + instStartMin;
+    const instEndMinutes = instEndHour * 60 + instEndMin;
+    const votEndMinutes = votEndHour * 60 + votEndMin;
+
+    if (currentMinutes >= instStartMinutes && currentMinutes < instEndMinutes) {
+      return "instalacion"; // 08:00-12:00: Solo instalación
+    } else if (currentMinutes >= instEndMinutes && currentMinutes < votEndMinutes) {
+      return "votacion"; // 12:00-18:00: Período de votación
+    } else if (currentMinutes >= votEndMinutes) {
+      return "conteo"; // 18:00+: Conteo de votos
+    } else {
+      return "none"; // Antes de las 08:00: Sin sincronización
+    }
+  }
+
   // Sincronizar ahora (manualmente)
   async syncNow() {
     try {
-      console.log(`🔄 [${new Date().toISOString()}] Sincronizando datos presidenciales...`);
+      const phase = this.getCurrentElectoralPhase();
+      console.log(`🔄 [${new Date().toISOString()}] Sincronizando datos presidenciales... (Fase: ${phase})`);
 
-      // Sincronizar totales y mesas en paralelo
-      const [totalesResult, mesasResult] = await Promise.allSettled([
-        this.syncTotales(),
-        this.syncMesas(),
-      ]);
+      let syncPromises = [];
+      let result = {};
 
-      const result = {
-        totales: totalesResult.status === "fulfilled" ? totalesResult.value : { error: totalesResult.reason?.message },
-        mesas: mesasResult.status === "fulfilled" ? mesasResult.value : { error: mesasResult.reason?.message },
-      };
+      // Determinar qué sincronizar según la fase electoral
+      switch (phase) {
+        case "instalacion":
+          // 08:00-12:00: Solo instalación (mesas se están instalando)
+          if (this.instalacionCompleta) {
+            console.log(`✅ Instalación completa (${this.instalacionCompletaThreshold}%), omitiendo sincronización`);
+            return {
+              success: true,
+              message: "Instalación completa, sincronización no necesaria",
+              changed: false,
+              phase,
+              instalacionCompleta: true,
+            };
+          }
+          console.log("📍 Fase de instalación: sincronizando solo instalacion.zip");
+          syncPromises = [this.syncInstalacion()];
+          break;
+
+        case "votacion":
+          // 12:00-18:00: Solo instalación con baja frecuencia (votación en curso)
+          if (this.instalacionCompleta) {
+            console.log(`✅ Instalación completa (${this.instalacionCompletaThreshold}%), omitiendo sincronización`);
+            return {
+              success: true,
+              message: "Instalación completa, sincronización no necesaria",
+              changed: false,
+              phase,
+              instalacionCompleta: true,
+            };
+          }
+          console.log("🗳️  Fase de votación: sincronizando solo instalacion.zip");
+          syncPromises = [this.syncInstalacion()];
+          break;
+
+        case "conteo":
+          // 18:00+: Todo (conteo de votos)
+          console.log("📊 Fase de conteo: sincronizando todo (totales, mesas, instalación)");
+          syncPromises = [
+            this.syncTotales(),
+            this.syncMesas(),
+            this.syncInstalacion(),
+          ];
+          break;
+
+        case "none":
+          // Antes de las 08:00: No sincronizar
+          console.log("⏸️  Fuera del horario electoral: sin sincronización");
+          return {
+            success: true,
+            message: "Fuera del horario electoral",
+            changed: false,
+            phase,
+          };
+
+        case "all":
+        default:
+          // Smart sync deshabilitado: sincronizar todo
+          console.log("🔄 Smart sync deshabilitado: sincronizando todo");
+          syncPromises = [
+            this.syncTotales(),
+            this.syncMesas(),
+            this.syncInstalacion(),
+          ];
+          break;
+      }
+
+      // Ejecutar sincronizaciones en paralelo
+      const results = await Promise.allSettled(syncPromises);
+
+      // Procesar resultados según la fase
+      if (phase === "instalacion" || phase === "votacion") {
+        result = {
+          instalacion: results[0].status === "fulfilled" ? results[0].value : { error: results[0].reason?.message },
+        };
+      } else {
+        result = {
+          totales: results[0]?.status === "fulfilled" ? results[0].value : { error: results[0]?.reason?.message },
+          mesas: results[1]?.status === "fulfilled" ? results[1].value : { error: results[1]?.reason?.message },
+          instalacion: results[2]?.status === "fulfilled" ? results[2].value : { error: results[2]?.reason?.message },
+        };
+      }
 
       this.syncStats.lastSync = new Date();
 
-      const hasChanges =
-        (totalesResult.status === "fulfilled" && totalesResult.value.changed) ||
-        (mesasResult.status === "fulfilled" && mesasResult.value.changed);
+      // Verificar si hubo cambios
+      const hasChanges = results.some(
+        (r) => r.status === "fulfilled" && r.value.changed
+      );
 
       if (hasChanges) {
         this.syncStats.successCount++;
@@ -92,6 +213,7 @@ class SyncService {
         success: true,
         message: hasChanges ? "Datos actualizados" : "Sin cambios",
         changed: hasChanges,
+        phase,
         ...result,
       };
     } catch (error) {
@@ -160,6 +282,44 @@ class SyncService {
       message: "Mesas actualizadas",
       changed: true,
       iteracion: newIteracion,
+      ...result,
+    };
+  }
+
+  // Sincronizar estado de instalación (instalacion.zip)
+  async syncInstalacion() {
+    const data = await this.fetchInstalacionData();
+
+    if (!data || data.length === 0) {
+      return { success: false, message: "No hay datos de instalación disponibles", changed: false };
+    }
+
+    // Verificar si hay cambios usando iteracion
+    const newIteracion = data[0]?.iteracion;
+    if (newIteracion === this.lastIteracionInstalacion) {
+      return { success: true, message: "Sin cambios en instalación", changed: false, iteracion: newIteracion };
+    }
+
+    // Verificar porcentaje de instalación
+    const porcentaje = parseFloat(data[0]?.porcentaje || "0");
+    if (porcentaje >= this.instalacionCompletaThreshold && !this.instalacionCompleta) {
+      this.instalacionCompleta = true;
+      console.log(`✅ ¡Instalación completa alcanzada! Porcentaje: ${porcentaje}%`);
+    }
+
+    // Hay cambios, actualizar BD
+    const result = await this.updateInstalacionDatabase(data);
+
+    this.lastIteracionInstalacion = newIteracion;
+    this.syncStats.lastInstalacionSync = new Date();
+
+    return {
+      success: true,
+      message: "Instalación actualizada",
+      changed: true,
+      iteracion: newIteracion,
+      porcentajeInstalacion: porcentaje,
+      instalacionCompleta: this.instalacionCompleta,
       ...result,
     };
   }
@@ -343,6 +503,92 @@ class SyncService {
     };
   }
 
+  // Descargar datos de instalación de SERVEL
+  async fetchInstalacionData() {
+    const url = `${this.apiUrl}/instalacion.zip`;
+
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 60000,
+      headers: {
+        Accept: "application/zip,application/octet-stream;q=0.9,*/*;q=0.8",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        Referer: "https://elecciones.servel.cl/",
+        Origin: "https://elecciones.servel.cl",
+      },
+    });
+
+    const buffer = Buffer.from(response.data);
+    const zip = new AdmZip(buffer);
+    const zipEntries = zip.getEntries();
+
+    const jsonEntry = zipEntries.find((entry) => entry.entryName.endsWith(".json"));
+
+    if (!jsonEntry) {
+      throw new Error("Archivo JSON no encontrado en instalacion.zip");
+    }
+
+    const jsonContent = zip.readAsText(jsonEntry, "utf8");
+    return JSON.parse(jsonContent);
+  }
+
+  // Actualizar base de datos con datos de instalación
+  async updateInstalacionDatabase(data) {
+    console.log(`Procesando ${data.length} registros de instalación en lotes...`);
+
+    const BATCH_SIZE = 1000;
+    let totalUpdated = 0;
+    let totalNotFound = 0;
+
+    // Dividir en lotes
+    for (let i = 0; i < data.length; i += BATCH_SIZE) {
+      const batch = data.slice(i, i + BATCH_SIZE);
+      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(data.length / BATCH_SIZE);
+
+      console.log(`Procesando lote ${batchNumber}/${totalBatches} (${batch.length} registros)...`);
+
+      const bulkOps = batch.map((instalacion) => ({
+        updateOne: {
+          filter: { id_mesa: instalacion.id_mesa },
+          update: {
+            $set: {
+              vocales: instalacion.vocales,
+              hora_instalacion: instalacion.hora_instalacion,
+              hora_actualizacion: instalacion.hora_actualizacion,
+              iteracion: instalacion.iteracion,
+              porcentaje: instalacion.porcentaje,
+            },
+          },
+          upsert: false, // No crear si no existe (solo actualizar)
+        },
+      }));
+
+      try {
+        const result = await MesaResult.bulkWrite(bulkOps, { ordered: false });
+        totalUpdated += result.modifiedCount;
+        totalNotFound += batch.length - result.modifiedCount;
+
+        console.log(`Lote ${batchNumber}/${totalBatches} completado: ${result.modifiedCount} actualizados`);
+      } catch (error) {
+        console.error(`Error en lote ${batchNumber}:`, error.message);
+      }
+    }
+
+    console.log("Datos de instalación actualizados:", {
+      actualizados: totalUpdated,
+      no_encontrados: totalNotFound,
+      total: data.length,
+    });
+
+    return {
+      actualizados: totalUpdated,
+      no_encontrados: totalNotFound,
+      total: data.length,
+    };
+  }
+
   // Obtener estadísticas
   getStats() {
     return {
@@ -350,6 +596,15 @@ class SyncService {
       syncInterval: this.syncInterval,
       lastIteracion: this.lastIteracion,
       lastIteracionMesas: this.lastIteracionMesas,
+      lastIteracionInstalacion: this.lastIteracionInstalacion,
+      smartSync: {
+        enabled: this.enableSmartSync,
+        currentPhase: this.getCurrentElectoralPhase(),
+        instalacionHours: `${this.instalacionStart}-${this.instalacionEnd}`,
+        votacionEndHour: this.votacionEnd,
+        instalacionCompleta: this.instalacionCompleta,
+        instalacionCompletaThreshold: this.instalacionCompletaThreshold,
+      },
       ...this.syncStats,
     };
   }
