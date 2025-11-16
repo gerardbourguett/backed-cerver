@@ -777,26 +777,26 @@ Cuando `ENABLE_SMART_SYNC=true`, el sistema ajusta automáticamente qué datos s
 #### Fases del Día Electoral
 
 **📍 Fase de Instalación (08:00-12:00)**
-- **Qué sincroniza**: Solo `instalacion.zip`
+- **Qué sincroniza**: Nada
 - **Por qué**: Las mesas se están instalando, los datos de votos aún no existen
-- **Uso**: Monitorear el progreso de instalación de mesas en tiempo real
+- **Uso**: Esperar hasta la fase de conteo
 
 **🗳️ Fase de Votación (12:00-18:00)**
-- **Qué sincroniza**: Solo `instalacion.zip`
+- **Qué sincroniza**: Nada
 - **Por qué**: Votación en curso, los resultados no se publican hasta el cierre
-- **Uso**: Verificar estado de mesas instaladas
+- **Uso**: Esperar hasta la fase de conteo
 
 **📊 Fase de Conteo (18:00+)**
-- **Qué sincroniza**: Todo (presidenciales, senadores y diputados)
-  - `total_votacion_4.zip` (presidenciales totales)
-  - `nomina_completa_4.zip` (presidenciales por mesa)
-  - `total_votacion_5.zip` (senadores totales)
-  - `nomina_completa_5.zip` (senadores por mesa)
-  - `total_votacion_6.zip` (diputados totales)
-  - `nomina_completa_6.zip` (diputados por mesa)
-  - `instalacion.zip` (estado de mesas)
+- **Qué sincroniza**: Todo en el siguiente orden
+  1. `total_votacion_4.zip` (presidenciales totales)
+  2. `nomina_completa_4.zip` (presidenciales por mesa)
+  3. `total_votacion_5.zip` (senadores totales)
+  4. `nomina_completa_5.zip` (senadores por mesa)
+  5. `total_votacion_6.zip` (diputados totales)
+  6. `nomina_completa_6.zip` (diputados por mesa)
 - **Por qué**: Comienza el escrutinio, los resultados se actualizan constantemente
 - **Uso**: Obtener resultados en tiempo real a medida que se cuentan los votos
+- **Orden**: Primero presidenciales, luego senadores, finalmente diputados
 
 **⏸️ Fuera de Horario (antes de 08:00)**
 - **Qué sincroniza**: Nada
@@ -805,11 +805,11 @@ Cuando `ENABLE_SMART_SYNC=true`, el sistema ajusta automáticamente qué datos s
 
 #### Ventajas de Smart Sync
 
-- ✅ **Eficiencia**: No descarga datos innecesarios (ej: resultados antes de las 18:00)
+- ✅ **Eficiencia**: No descarga datos innecesarios (solo en fase de conteo)
 - ✅ **Precisión**: Sincroniza lo relevante para cada momento del día electoral
 - ✅ **Recursos**: Reduce carga en servidor y bandwidth
 - ✅ **Flexibilidad**: Horarios configurables vía variables de entorno
-- ✅ **Optimización de instalación**: Deja de sincronizar instalacion.zip cuando alcanza 99.5% (configurable)
+- ✅ **Orden correcto**: Presidenciales → Senadores → Diputados
 
 ### Características clave
 

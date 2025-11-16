@@ -133,46 +133,25 @@ class SyncService {
       // Determinar qué sincronizar según la fase electoral
       switch (phase) {
         case "instalacion":
-          // 08:00-12:00: Solo instalación (mesas se están instalando)
-          if (this.instalacionCompleta) {
-            console.log(`✅ Instalación completa (${this.instalacionCompletaThreshold}%), omitiendo sincronización`);
-            return {
-              success: true,
-              message: "Instalación completa, sincronización no necesaria",
-              changed: false,
-              phase,
-              instalacionCompleta: true,
-            };
-          }
-          console.log("📍 Fase de instalación: sincronizando solo instalacion.zip");
-          syncPromises = [this.syncInstalacion()];
-          break;
-
         case "votacion":
-          // 12:00-18:00: Solo instalación con baja frecuencia (votación en curso)
-          if (this.instalacionCompleta) {
-            console.log(`✅ Instalación completa (${this.instalacionCompletaThreshold}%), omitiendo sincronización`);
-            return {
-              success: true,
-              message: "Instalación completa, sincronización no necesaria",
-              changed: false,
-              phase,
-              instalacionCompleta: true,
-            };
-          }
-          console.log("🗳️  Fase de votación: sincronizando solo instalacion.zip");
-          syncPromises = [this.syncInstalacion()];
-          break;
+          // 08:00-18:00: No sincronizar durante instalación y votación
+          console.log("⏸️  Fase de instalación/votación: sin sincronización (esperando conteo)");
+          return {
+            success: true,
+            message: "Fase de instalación/votación, esperando conteo",
+            changed: false,
+            phase,
+          };
 
         case "conteo":
-          // 18:00+: Todo (conteo de votos)
+          // 18:00+: Sincronizar todo en orden (presidenciales, senadores, diputados)
           if (isFirstSync) {
             // Primera sincronización: secuencial para evitar out of memory
             console.log("📊 Fase de conteo: primera sincronización (secuencial para evitar OOM)");
             return await this.syncSequential();
           } else {
             // Sincronizaciones subsecuentes: paralelo para velocidad
-            console.log("📊 Fase de conteo: sincronizando todo (presidenciales, senadores, diputados, mesas, instalación)");
+            console.log("📊 Fase de conteo: sincronizando todo (presidenciales, senadores, diputados)");
             syncPromises = [
               this.syncTotales(),
               this.syncMesas(),
@@ -180,7 +159,6 @@ class SyncService {
               this.syncMesasSenadores(),
               this.syncTotalesDiputados(),
               this.syncMesasDiputados(),
-              this.syncInstalacion(),
             ];
           }
           break;
@@ -212,7 +190,6 @@ class SyncService {
               this.syncMesasSenadores(),
               this.syncTotalesDiputados(),
               this.syncMesasDiputados(),
-              this.syncInstalacion(),
             ];
           }
           break;
@@ -221,22 +198,15 @@ class SyncService {
       // Ejecutar sincronizaciones en paralelo
       const results = await Promise.allSettled(syncPromises);
 
-      // Procesar resultados según la fase
-      if (phase === "instalacion" || phase === "votacion") {
-        result = {
-          instalacion: results[0].status === "fulfilled" ? results[0].value : { error: results[0].reason?.message },
-        };
-      } else {
-        result = {
-          totales: results[0]?.status === "fulfilled" ? results[0].value : { error: results[0]?.reason?.message },
-          mesas: results[1]?.status === "fulfilled" ? results[1].value : { error: results[1]?.reason?.message },
-          senadoresTotales: results[2]?.status === "fulfilled" ? results[2].value : { error: results[2]?.reason?.message },
-          senadoresMesas: results[3]?.status === "fulfilled" ? results[3].value : { error: results[3]?.reason?.message },
-          diputadosTotales: results[4]?.status === "fulfilled" ? results[4].value : { error: results[4]?.reason?.message },
-          diputadosMesas: results[5]?.status === "fulfilled" ? results[5].value : { error: results[5]?.reason?.message },
-          instalacion: results[6]?.status === "fulfilled" ? results[6].value : { error: results[6]?.reason?.message },
-        };
-      }
+      // Procesar resultados (orden: presidenciales, senadores, diputados)
+      result = {
+        totales: results[0]?.status === "fulfilled" ? results[0].value : { error: results[0]?.reason?.message },
+        mesas: results[1]?.status === "fulfilled" ? results[1].value : { error: results[1]?.reason?.message },
+        senadoresTotales: results[2]?.status === "fulfilled" ? results[2].value : { error: results[2]?.reason?.message },
+        senadoresMesas: results[3]?.status === "fulfilled" ? results[3].value : { error: results[3]?.reason?.message },
+        diputadosTotales: results[4]?.status === "fulfilled" ? results[4].value : { error: results[4]?.reason?.message },
+        diputadosMesas: results[5]?.status === "fulfilled" ? results[5].value : { error: results[5]?.reason?.message },
+      };
 
       this.syncStats.lastSync = new Date();
 
@@ -278,32 +248,28 @@ class SyncService {
 
     try {
       // 1. Totales presidenciales
-      console.log("1/7 Sincronizando totales presidenciales...");
+      console.log("1/6 Sincronizando totales presidenciales...");
       results.totales = await this.syncTotales();
 
       // 2. Mesas presidenciales
-      console.log("2/7 Sincronizando mesas presidenciales...");
+      console.log("2/6 Sincronizando mesas presidenciales...");
       results.mesas = await this.syncMesas();
 
       // 3. Totales senadores
-      console.log("3/7 Sincronizando totales senadores...");
+      console.log("3/6 Sincronizando totales senadores...");
       results.senadoresTotales = await this.syncTotalesSenadores();
 
       // 4. Mesas senadores
-      console.log("4/7 Sincronizando mesas senadores...");
+      console.log("4/6 Sincronizando mesas senadores...");
       results.senadoresMesas = await this.syncMesasSenadores();
 
       // 5. Totales diputados
-      console.log("5/7 Sincronizando totales diputados...");
+      console.log("5/6 Sincronizando totales diputados...");
       results.diputadosTotales = await this.syncTotalesDiputados();
 
       // 6. Mesas diputados
-      console.log("6/7 Sincronizando mesas diputados...");
+      console.log("6/6 Sincronizando mesas diputados...");
       results.diputadosMesas = await this.syncMesasDiputados();
-
-      // 7. Instalación
-      console.log("7/7 Sincronizando instalación...");
-      results.instalacion = await this.syncInstalacion();
 
       this.syncStats.lastSync = new Date();
 
