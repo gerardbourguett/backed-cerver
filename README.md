@@ -365,6 +365,62 @@ Obtiene la lista de circunscripciones senatoriales disponibles.
 }
 ```
 
+#### `GET /api/senadores/resultados/circunscripcion/:id_cirsen`
+Obtiene resultados detallados de senadores por circunscripción, incluyendo pactos, candidatos y método D'Hont.
+
+**Parámetros de ruta:**
+- `id_cirsen`: ID de la circunscripción senatorial
+
+**Ejemplo:**
+```bash
+GET /api/senadores/resultados/circunscripcion/1
+```
+
+**Respuesta:**
+```json
+{
+  "circunscripcion": {
+    "id_cirsen": 1,
+    "nombre": "Tarapacá y Antofagasta"
+  },
+  "escrutinio": {
+    "total_mesas": 2500,
+    "mesas_escrutadas": 2450,
+    "porcentaje": "98.00"
+  },
+  "votacion": {
+    "total_emitidos": 125000,
+    "blancos": 1500,
+    "nulos": 800,
+    "validos": 122700
+  },
+  "pactos": [
+    {
+      "id_pacto": 1,
+      "glosa_pacto": "Chile Vamos",
+      "lista": "A",
+      "partidos": ["UDI", "RN"],
+      "total_votos": 45000,
+      "porcentaje": "36.67",
+      "electos": 2,
+      "candidatos": [
+        {
+          "id": 51900101,
+          "votos": 25000,
+          "candidato": "JUAN PEREZ",
+          "sigla_partido": "UDI",
+          "id_partido": 101,
+          "id_pacto": 1,
+          "orden": 1,
+          "electo": 1
+        }
+      ]
+    }
+  ],
+  "total_candidatos": 15
+}
+```
+
 #### `GET /api/senadores/candidatos`
 Obtiene la lista de todos los candidatos senatoriales o filtrados por circunscripción.
 
@@ -478,6 +534,62 @@ Obtiene la lista de distritos disponibles.
       "orden_distrito": 2
     }
   ]
+}
+```
+
+#### `GET /api/diputados/resultados/distrito/:id_distrito`
+Obtiene resultados detallados de diputados por distrito, incluyendo pactos, candidatos y método D'Hont.
+
+**Parámetros de ruta:**
+- `id_distrito`: ID del distrito
+
+**Ejemplo:**
+```bash
+GET /api/diputados/resultados/distrito/1
+```
+
+**Respuesta:**
+```json
+{
+  "distrito": {
+    "id_distrito": 1,
+    "nombre": "Arica y Parinacota"
+  },
+  "escrutinio": {
+    "total_mesas": 1200,
+    "mesas_escrutadas": 1150,
+    "porcentaje": "95.83"
+  },
+  "votacion": {
+    "total_emitidos": 62000,
+    "blancos": 800,
+    "nulos": 450,
+    "validos": 60750
+  },
+  "pactos": [
+    {
+      "id_pacto": 2,
+      "glosa_pacto": "Apruebo Dignidad",
+      "lista": "B",
+      "partidos": ["PC", "FA"],
+      "total_votos": 23000,
+      "porcentaje": "37.86",
+      "electos": 1,
+      "candidatos": [
+        {
+          "id": 61900101,
+          "votos": 14000,
+          "candidato": "MARIA GONZALEZ",
+          "sigla_partido": "PS",
+          "id_partido": 102,
+          "id_pacto": 2,
+          "orden": 1,
+          "electo": 1
+        }
+      ]
+    }
+  ],
+  "total_candidatos": 25
 }
 ```
 
