@@ -268,6 +268,51 @@ app.get("/api/presidenciales/nomina", async (req, res) => {
   }
 });
 
+// GET - Obtener estado de instalación de mesas
+app.get("/api/presidenciales/instalacion", async (req, res) => {
+  try {
+    const url = `${apiUrl}/instalacion.zip`;
+    console.log(`Descargando instalación desde ${url}...`);
+
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+      headers: {
+        Accept: "application/zip,application/octet-stream;q=0.9,*/*;q=0.8",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+        Referer: "https://elecciones.servel.cl/",
+        Origin: "https://elecciones.servel.cl",
+      },
+    });
+
+    const buffer = Buffer.from(response.data);
+    const zip = new AdmZip(buffer);
+    const zipEntries = zip.getEntries();
+
+    // Buscar archivo JSON
+    const jsonEntry = zipEntries.find((entry) => entry.entryName.endsWith(".json"));
+
+    if (!jsonEntry) {
+      return res.status(404).json({
+        error: "Archivo JSON no encontrado en el ZIP",
+        archivos: zipEntries.map((entry) => entry.entryName),
+      });
+    }
+
+    const jsonContent = zip.readAsText(jsonEntry, "utf8");
+    const data = JSON.parse(jsonContent);
+
+    res.json(data);
+  } catch (error) {
+    console.error("Error al obtener instalación:", error);
+    res.status(500).json({
+      error: "Error al obtener datos de instalación",
+      details: error.message,
+    });
+  }
+});
+
 // GET - Obtener resultados presidenciales desde BD
 app.get("/api/presidenciales/resultados", async (req, res) => {
   try {
