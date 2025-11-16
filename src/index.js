@@ -642,6 +642,179 @@ app.get("/api/senadores/circunscripciones", async (req, res) => {
   }
 });
 
+// GET - Obtener resultados de senadores por circunscripción (método D'Hont)
+app.get("/api/senadores/resultados/circunscripcion/:id_cirsen", async (req, res) => {
+  try {
+    const { id_cirsen } = req.params;
+    const cirsenId = parseInt(id_cirsen);
+
+    // Obtener información de la circunscripción
+    const circunscripcion = await Territory.findOne({ id_cirsen: cirsenId })
+      .select("id_cirsen glosacirsen")
+      .lean();
+
+    if (!circunscripcion) {
+      return res.status(404).json({
+        error: `Circunscripción ${id_cirsen} no encontrada`,
+      });
+    }
+
+    // Obtener mesas de esta circunscripción para calcular escrutinio
+    const mesas = await MesaResult.find({
+      cod_eleccion: 5,
+      id_cirsen: cirsenId,
+    })
+      .select("id_mesa instalada candidatos total_emitidos blancos nulos")
+      .lean();
+
+    if (mesas.length === 0) {
+      return res.status(404).json({
+        error: `No hay datos de mesas para la circunscripción ${id_cirsen}`,
+        circunscripcion: circunscripcion.glosacirsen,
+      });
+    }
+
+    // Calcular totales por candidato
+    const votosMap = new Map();
+    const pactoMap = new Map();
+    let totalMesas = mesas.length;
+    let mesasEscrutadas = 0;
+    let totalVotosEmitidos = 0;
+    let totalBlancos = 0;
+    let totalNulos = 0;
+
+    for (const mesa of mesas) {
+      if (mesa.total_emitidos > 0) {
+        mesasEscrutadas++;
+        totalVotosEmitidos += mesa.total_emitidos || 0;
+        totalBlancos += mesa.blancos || 0;
+        totalNulos += mesa.nulos || 0;
+      }
+
+      if (mesa.candidatos) {
+        for (const candidato of mesa.candidatos) {
+          const id = candidato.id_candidato;
+          if (!votosMap.has(id)) {
+            votosMap.set(id, {
+              id: id,
+              votos: 0,
+              id_partido: candidato.id_partido,
+              id_pacto: candidato.id_pacto,
+              id_subpacto: candidato.id_subpacto,
+              orden: candidato.orden_voto,
+              electo: candidato.electo,
+            });
+          }
+          const current = votosMap.get(id);
+          current.votos += candidato.votos || 0;
+
+          // Acumular votos por pacto
+          if (candidato.id_pacto) {
+            if (!pactoMap.has(candidato.id_pacto)) {
+              pactoMap.set(candidato.id_pacto, 0);
+            }
+            pactoMap.set(candidato.id_pacto, pactoMap.get(candidato.id_pacto) + (candidato.votos || 0));
+          }
+        }
+      }
+    }
+
+    // Obtener información de candidatos desde resultados totales
+    const resultados = await PresidentialResult.find({ id_eleccion: 5 }).lean();
+    const candidatosInfo = new Map();
+    const pactosInfo = new Map();
+
+    for (const resultado of resultados) {
+      if (resultado.detalles) {
+        for (const detalle of resultado.detalles) {
+          // Guardar info de pactos
+          if (detalle.glosa_pacto) {
+            const pactoId = detalle.candidatos?.[0]?.id_pacto;
+            if (pactoId && !pactosInfo.has(pactoId)) {
+              pactosInfo.set(pactoId, {
+                id_pacto: pactoId,
+                glosa_pacto: detalle.glosa_pacto,
+                lista: detalle.lista,
+                partidos: detalle.partidos,
+              });
+            }
+          }
+
+          // Guardar info de candidatos
+          if (detalle.candidatos) {
+            for (const cand of detalle.candidatos) {
+              if (!candidatosInfo.has(cand.id)) {
+                candidatosInfo.set(cand.id, {
+                  candidato: cand.candidato,
+                  sigla_partido: cand.sigla_partido,
+                  filterName: cand.filterName,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Combinar datos de candidatos
+    const candidatos = Array.from(votosMap.values())
+      .map((c) => ({
+        ...c,
+        ...(candidatosInfo.get(c.id) || {}),
+      }))
+      .sort((a, b) => b.votos - a.votos);
+
+    // Agrupar candidatos por pacto
+    const pactos = [];
+    for (const [pactoId, totalVotos] of pactoMap.entries()) {
+      const pactoInfo = pactosInfo.get(pactoId) || {};
+      const candidatosPacto = candidatos.filter((c) => c.id_pacto === pactoId);
+
+      pactos.push({
+        id_pacto: pactoId,
+        glosa_pacto: pactoInfo.glosa_pacto || `Pacto ${pactoId}`,
+        lista: pactoInfo.lista,
+        partidos: pactoInfo.partidos || [],
+        total_votos: totalVotos,
+        porcentaje: mesasEscrutadas > 0 ? ((totalVotos / (totalVotosEmitidos - totalBlancos - totalNulos)) * 100).toFixed(2) : "0.00",
+        candidatos: candidatosPacto,
+        electos: candidatosPacto.filter((c) => c.electo === 1).length,
+      });
+    }
+
+    // Ordenar pactos por votos
+    pactos.sort((a, b) => b.total_votos - a.total_votos);
+
+    // Calcular porcentaje de escrutinio
+    const porcentajeEscrutinio = totalMesas > 0 ? ((mesasEscrutadas / totalMesas) * 100).toFixed(2) : "0.00";
+
+    res.json({
+      circunscripcion: {
+        id_cirsen: cirsenId,
+        nombre: circunscripcion.glosacirsen,
+      },
+      escrutinio: {
+        total_mesas: totalMesas,
+        mesas_escrutadas: mesasEscrutadas,
+        porcentaje: porcentajeEscrutinio,
+      },
+      votacion: {
+        total_emitidos: totalVotosEmitidos,
+        blancos: totalBlancos,
+        nulos: totalNulos,
+        validos: totalVotosEmitidos - totalBlancos - totalNulos,
+      },
+      pactos: pactos,
+      total_candidatos: candidatos.length,
+    });
+  } catch (error) {
+    console.error("Error al consultar resultados por circunscripción:", error);
+    res.status(500).json({
+      error: "Error al consultar resultados de senadores por circunscripción",
+    });
+  }
+});
+
 // GET - Obtener candidatos senatoriales (opcionalmente filtrados por circunscripción)
 app.get("/api/senadores/candidatos", async (req, res) => {
   try {
@@ -927,6 +1100,179 @@ app.get("/api/diputados/distritos", async (req, res) => {
     console.error("Error al consultar distritos:", error);
     res.status(500).json({
       error: "Error al consultar distritos",
+    });
+  }
+});
+
+// GET - Obtener resultados de diputados por distrito (método D'Hont)
+app.get("/api/diputados/resultados/distrito/:id_distrito", async (req, res) => {
+  try {
+    const { id_distrito } = req.params;
+    const distritoId = parseInt(id_distrito);
+
+    // Obtener información del distrito
+    const distrito = await Territory.findOne({ id_distrito: distritoId })
+      .select("id_distrito distrito")
+      .lean();
+
+    if (!distrito) {
+      return res.status(404).json({
+        error: `Distrito ${id_distrito} no encontrado`,
+      });
+    }
+
+    // Obtener mesas de este distrito para calcular escrutinio
+    const mesas = await MesaResult.find({
+      cod_eleccion: 6,
+      id_distrito: distritoId,
+    })
+      .select("id_mesa instalada candidatos total_emitidos blancos nulos")
+      .lean();
+
+    if (mesas.length === 0) {
+      return res.status(404).json({
+        error: `No hay datos de mesas para el distrito ${id_distrito}`,
+        distrito: distrito.distrito,
+      });
+    }
+
+    // Calcular totales por candidato
+    const votosMap = new Map();
+    const pactoMap = new Map();
+    let totalMesas = mesas.length;
+    let mesasEscrutadas = 0;
+    let totalVotosEmitidos = 0;
+    let totalBlancos = 0;
+    let totalNulos = 0;
+
+    for (const mesa of mesas) {
+      if (mesa.total_emitidos > 0) {
+        mesasEscrutadas++;
+        totalVotosEmitidos += mesa.total_emitidos || 0;
+        totalBlancos += mesa.blancos || 0;
+        totalNulos += mesa.nulos || 0;
+      }
+
+      if (mesa.candidatos) {
+        for (const candidato of mesa.candidatos) {
+          const id = candidato.id_candidato;
+          if (!votosMap.has(id)) {
+            votosMap.set(id, {
+              id: id,
+              votos: 0,
+              id_partido: candidato.id_partido,
+              id_pacto: candidato.id_pacto,
+              id_subpacto: candidato.id_subpacto,
+              orden: candidato.orden_voto,
+              electo: candidato.electo,
+            });
+          }
+          const current = votosMap.get(id);
+          current.votos += candidato.votos || 0;
+
+          // Acumular votos por pacto
+          if (candidato.id_pacto) {
+            if (!pactoMap.has(candidato.id_pacto)) {
+              pactoMap.set(candidato.id_pacto, 0);
+            }
+            pactoMap.set(candidato.id_pacto, pactoMap.get(candidato.id_pacto) + (candidato.votos || 0));
+          }
+        }
+      }
+    }
+
+    // Obtener información de candidatos desde resultados totales
+    const resultados = await PresidentialResult.find({ id_eleccion: 6 }).lean();
+    const candidatosInfo = new Map();
+    const pactosInfo = new Map();
+
+    for (const resultado of resultados) {
+      if (resultado.detalles) {
+        for (const detalle of resultado.detalles) {
+          // Guardar info de pactos
+          if (detalle.glosa_pacto) {
+            const pactoId = detalle.candidatos?.[0]?.id_pacto;
+            if (pactoId && !pactosInfo.has(pactoId)) {
+              pactosInfo.set(pactoId, {
+                id_pacto: pactoId,
+                glosa_pacto: detalle.glosa_pacto,
+                lista: detalle.lista,
+                partidos: detalle.partidos,
+              });
+            }
+          }
+
+          // Guardar info de candidatos
+          if (detalle.candidatos) {
+            for (const cand of detalle.candidatos) {
+              if (!candidatosInfo.has(cand.id)) {
+                candidatosInfo.set(cand.id, {
+                  candidato: cand.candidato,
+                  sigla_partido: cand.sigla_partido,
+                  filterName: cand.filterName,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Combinar datos de candidatos
+    const candidatos = Array.from(votosMap.values())
+      .map((c) => ({
+        ...c,
+        ...(candidatosInfo.get(c.id) || {}),
+      }))
+      .sort((a, b) => b.votos - a.votos);
+
+    // Agrupar candidatos por pacto
+    const pactos = [];
+    for (const [pactoId, totalVotos] of pactoMap.entries()) {
+      const pactoInfo = pactosInfo.get(pactoId) || {};
+      const candidatosPacto = candidatos.filter((c) => c.id_pacto === pactoId);
+
+      pactos.push({
+        id_pacto: pactoId,
+        glosa_pacto: pactoInfo.glosa_pacto || `Pacto ${pactoId}`,
+        lista: pactoInfo.lista,
+        partidos: pactoInfo.partidos || [],
+        total_votos: totalVotos,
+        porcentaje: mesasEscrutadas > 0 ? ((totalVotos / (totalVotosEmitidos - totalBlancos - totalNulos)) * 100).toFixed(2) : "0.00",
+        candidatos: candidatosPacto,
+        electos: candidatosPacto.filter((c) => c.electo === 1).length,
+      });
+    }
+
+    // Ordenar pactos por votos
+    pactos.sort((a, b) => b.total_votos - a.total_votos);
+
+    // Calcular porcentaje de escrutinio
+    const porcentajeEscrutinio = totalMesas > 0 ? ((mesasEscrutadas / totalMesas) * 100).toFixed(2) : "0.00";
+
+    res.json({
+      distrito: {
+        id_distrito: distritoId,
+        nombre: distrito.distrito,
+      },
+      escrutinio: {
+        total_mesas: totalMesas,
+        mesas_escrutadas: mesasEscrutadas,
+        porcentaje: porcentajeEscrutinio,
+      },
+      votacion: {
+        total_emitidos: totalVotosEmitidos,
+        blancos: totalBlancos,
+        nulos: totalNulos,
+        validos: totalVotosEmitidos - totalBlancos - totalNulos,
+      },
+      pactos: pactos,
+      total_candidatos: candidatos.length,
+    });
+  } catch (error) {
+    console.error("Error al consultar resultados por distrito:", error);
+    res.status(500).json({
+      error: "Error al consultar resultados de diputados por distrito",
     });
   }
 });

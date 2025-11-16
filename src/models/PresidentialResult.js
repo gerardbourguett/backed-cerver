@@ -1,37 +1,7 @@
 import mongoose from "mongoose";
 
-// Sub-esquema para candidatos dentro de detalles
-const candidatoDetalleSchema = new mongoose.Schema(
-  {
-    id: { type: Number, required: true },
-    orden: { type: Number },
-    electo: { type: Number },
-    candidato: { type: String },
-    filterName: { type: String },
-    sigla_partido: { type: String },
-    totalVotosCandidatos: { type: Number },
-  },
-  { _id: false }
-);
-
-// Sub-esquema para detalles (pactos/listas)
-const detalleSchema = new mongoose.Schema(
-  {
-    name: { type: String },
-    lista: { type: String },
-    partidos: [{ type: String }],
-    candidatos: [candidatoDetalleSchema],
-    filterName: { type: String },
-    porc_votos: { type: String },
-    glosa_pacto: { type: String },
-    totalNominados: { type: Number },
-    totalCandidatos: { type: Number },
-    totalVotosLista: { type: Number },
-  },
-  { _id: false }
-);
-
 // Esquema principal de resultados presidenciales
+// Usamos Mixed para detalles para aceptar cualquier estructura de SERVEL
 const presidentialResultSchema = new mongoose.Schema(
   {
     name: {
@@ -59,11 +29,13 @@ const presidentialResultSchema = new mongoose.Schema(
     porc: { type: String, default: "0.00" },
     totalCandidatos: { type: Number, default: 0 },
     totalNominados: { type: Number, default: 0 },
-    detalles: [detalleSchema],
+    // Usar Mixed para detalles: acepta cualquier estructura que venga de SERVEL
+    detalles: { type: mongoose.Schema.Types.Mixed, default: [] },
   },
   {
     timestamps: true,
     collection: "presidential_results",
+    strict: false, // Permite campos adicionales no definidos en el schema
   }
 );
 
