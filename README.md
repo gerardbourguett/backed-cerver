@@ -616,6 +616,7 @@ Cuando `ENABLE_SMART_SYNC=true`, el sistema ajusta automáticamente qué datos s
 - ✅ **Configurable**: Intervalo ajustable según necesidades
 - ✅ **Control manual**: Iniciar/detener en cualquier momento
 - ✅ **Estadísticas**: Monitoreo en tiempo real
+- ✅ **Optimizado para memoria**: Primera sincronización es secuencial para evitar OOM, sincronizaciones subsecuentes son paralelas para velocidad
 
 ### Configuración recomendada
 
