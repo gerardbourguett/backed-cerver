@@ -346,8 +346,8 @@ class SyncService {
       return { success: true, message: "Sin cambios en mesas", changed: false, iteracion: newIteracion };
     }
 
-    // Hay cambios, actualizar BD
-    const result = await this.updateMesasDatabase(data);
+    // Hay cambios, actualizar BD con batch size optimizado (40,473 mesas)
+    const result = await this.updateMesasDatabase(data, 400); // Usar batch size de 400 para evitar OOM
 
     this.lastIteracionMesas = newIteracion;
     this.syncStats.lastMesasSync = new Date();
@@ -708,8 +708,8 @@ class SyncService {
       return { success: true, message: "Sin cambios en mesas de senadores", changed: false, iteracion: newIteracion };
     }
 
-    // Hay cambios, actualizar BD
-    const result = await this.updateMesasDatabase(data);
+    // Hay cambios, actualizar BD con batch size menor (11,483 mesas)
+    const result = await this.updateMesasDatabase(data, 400); // Usar batch size de 400
 
     this.lastIteracionMesasSenadores = newIteracion;
     this.syncStats.lastMesasSenadoresSync = new Date();
@@ -769,7 +769,7 @@ class SyncService {
     }
 
     // Hay cambios, actualizar BD con batch size menor (diputados tiene MUCHOS más datos - 40,473 mesas)
-    const result = await this.updateMesasDatabase(data, 500); // Usar batch size de 500 en lugar de 1000
+    const result = await this.updateMesasDatabase(data, 300); // Usar batch size de 300 para evitar OOM
 
     this.lastIteracionMesasDiputados = newIteracion;
     this.syncStats.lastMesasDiputadosSync = new Date();
