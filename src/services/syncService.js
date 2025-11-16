@@ -27,6 +27,10 @@ class SyncService {
     this.instalacionEnd = process.env.INSTALACION_END_HOUR || "12:00";
     this.votacionEnd = process.env.VOTACION_END_HOUR || "18:00";
     this.enableSmartSync = process.env.ENABLE_SMART_SYNC === "true";
+
+    // Flag para indicar si ya se alcanzó el 100% de instalación
+    this.instalacionCompleta = false;
+    this.instalacionCompletaThreshold = parseFloat(process.env.INSTALACION_COMPLETE_THRESHOLD || "99.5"); // 99.5% por defecto
   }
 
   // Iniciar sincronización automática
@@ -114,12 +118,32 @@ class SyncService {
       switch (phase) {
         case "instalacion":
           // 08:00-12:00: Solo instalación (mesas se están instalando)
+          if (this.instalacionCompleta) {
+            console.log(`✅ Instalación completa (${this.instalacionCompletaThreshold}%), omitiendo sincronización`);
+            return {
+              success: true,
+              message: "Instalación completa, sincronización no necesaria",
+              changed: false,
+              phase,
+              instalacionCompleta: true,
+            };
+          }
           console.log("📍 Fase de instalación: sincronizando solo instalacion.zip");
           syncPromises = [this.syncInstalacion()];
           break;
 
         case "votacion":
           // 12:00-18:00: Solo instalación con baja frecuencia (votación en curso)
+          if (this.instalacionCompleta) {
+            console.log(`✅ Instalación completa (${this.instalacionCompletaThreshold}%), omitiendo sincronización`);
+            return {
+              success: true,
+              message: "Instalación completa, sincronización no necesaria",
+              changed: false,
+              phase,
+              instalacionCompleta: true,
+            };
+          }
           console.log("🗳️  Fase de votación: sincronizando solo instalacion.zip");
           syncPromises = [this.syncInstalacion()];
           break;
@@ -276,6 +300,13 @@ class SyncService {
       return { success: true, message: "Sin cambios en instalación", changed: false, iteracion: newIteracion };
     }
 
+    // Verificar porcentaje de instalación
+    const porcentaje = parseFloat(data[0]?.porcentaje || "0");
+    if (porcentaje >= this.instalacionCompletaThreshold && !this.instalacionCompleta) {
+      this.instalacionCompleta = true;
+      console.log(`✅ ¡Instalación completa alcanzada! Porcentaje: ${porcentaje}%`);
+    }
+
     // Hay cambios, actualizar BD
     const result = await this.updateInstalacionDatabase(data);
 
@@ -287,6 +318,8 @@ class SyncService {
       message: "Instalación actualizada",
       changed: true,
       iteracion: newIteracion,
+      porcentajeInstalacion: porcentaje,
+      instalacionCompleta: this.instalacionCompleta,
       ...result,
     };
   }
@@ -569,6 +602,8 @@ class SyncService {
         currentPhase: this.getCurrentElectoralPhase(),
         instalacionHours: `${this.instalacionStart}-${this.instalacionEnd}`,
         votacionEndHour: this.votacionEnd,
+        instalacionCompleta: this.instalacionCompleta,
+        instalacionCompletaThreshold: this.instalacionCompletaThreshold,
       },
       ...this.syncStats,
     };
