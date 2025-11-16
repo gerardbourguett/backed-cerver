@@ -127,6 +127,9 @@ class SyncService {
       let syncPromises = [];
       let result = {};
 
+      // Detectar si es primera sincronización (sin iteraciones previas)
+      const isFirstSync = !this.lastIteracion && !this.lastIteracionSenadores && !this.lastIteracionDiputados;
+
       // Determinar qué sincronizar según la fase electoral
       switch (phase) {
         case "instalacion":
@@ -163,16 +166,23 @@ class SyncService {
 
         case "conteo":
           // 18:00+: Todo (conteo de votos)
-          console.log("📊 Fase de conteo: sincronizando todo (presidenciales, senadores, diputados, mesas, instalación)");
-          syncPromises = [
-            this.syncTotales(),
-            this.syncMesas(),
-            this.syncTotalesSenadores(),
-            this.syncMesasSenadores(),
-            this.syncTotalesDiputados(),
-            this.syncMesasDiputados(),
-            this.syncInstalacion(),
-          ];
+          if (isFirstSync) {
+            // Primera sincronización: secuencial para evitar out of memory
+            console.log("📊 Fase de conteo: primera sincronización (secuencial para evitar OOM)");
+            return await this.syncSequential();
+          } else {
+            // Sincronizaciones subsecuentes: paralelo para velocidad
+            console.log("📊 Fase de conteo: sincronizando todo (presidenciales, senadores, diputados, mesas, instalación)");
+            syncPromises = [
+              this.syncTotales(),
+              this.syncMesas(),
+              this.syncTotalesSenadores(),
+              this.syncMesasSenadores(),
+              this.syncTotalesDiputados(),
+              this.syncMesasDiputados(),
+              this.syncInstalacion(),
+            ];
+          }
           break;
 
         case "none":
@@ -188,16 +198,23 @@ class SyncService {
         case "all":
         default:
           // Smart sync deshabilitado: sincronizar todo
-          console.log("🔄 Smart sync deshabilitado: sincronizando todo");
-          syncPromises = [
-            this.syncTotales(),
-            this.syncMesas(),
-            this.syncTotalesSenadores(),
-            this.syncMesasSenadores(),
-            this.syncTotalesDiputados(),
-            this.syncMesasDiputados(),
-            this.syncInstalacion(),
-          ];
+          if (isFirstSync) {
+            // Primera sincronización: secuencial para evitar out of memory
+            console.log("🔄 Smart sync deshabilitado: primera sincronización (secuencial para evitar OOM)");
+            return await this.syncSequential();
+          } else {
+            // Sincronizaciones subsecuentes: paralelo para velocidad
+            console.log("🔄 Smart sync deshabilitado: sincronizando todo");
+            syncPromises = [
+              this.syncTotales(),
+              this.syncMesas(),
+              this.syncTotalesSenadores(),
+              this.syncMesasSenadores(),
+              this.syncTotalesDiputados(),
+              this.syncMesasDiputados(),
+              this.syncInstalacion(),
+            ];
+          }
           break;
       }
 
@@ -250,6 +267,73 @@ class SyncService {
         success: false,
         message: error.message,
         error: true,
+      };
+    }
+  }
+
+  // Sincronizar de forma secuencial (para evitar OOM en primera sincronización)
+  async syncSequential() {
+    console.log("🔄 Iniciando sincronización secuencial...");
+    const results = {};
+
+    try {
+      // 1. Totales presidenciales
+      console.log("1/7 Sincronizando totales presidenciales...");
+      results.totales = await this.syncTotales();
+
+      // 2. Mesas presidenciales
+      console.log("2/7 Sincronizando mesas presidenciales...");
+      results.mesas = await this.syncMesas();
+
+      // 3. Totales senadores
+      console.log("3/7 Sincronizando totales senadores...");
+      results.senadoresTotales = await this.syncTotalesSenadores();
+
+      // 4. Mesas senadores
+      console.log("4/7 Sincronizando mesas senadores...");
+      results.senadoresMesas = await this.syncMesasSenadores();
+
+      // 5. Totales diputados
+      console.log("5/7 Sincronizando totales diputados...");
+      results.diputadosTotales = await this.syncTotalesDiputados();
+
+      // 6. Mesas diputados
+      console.log("6/7 Sincronizando mesas diputados...");
+      results.diputadosMesas = await this.syncMesasDiputados();
+
+      // 7. Instalación
+      console.log("7/7 Sincronizando instalación...");
+      results.instalacion = await this.syncInstalacion();
+
+      this.syncStats.lastSync = new Date();
+
+      // Verificar si hubo cambios
+      const hasChanges = Object.values(results).some(r => r && r.changed);
+
+      if (hasChanges) {
+        this.syncStats.successCount++;
+      }
+
+      console.log(`✅ Sincronización secuencial completada`);
+
+      return {
+        success: true,
+        message: hasChanges ? "Datos actualizados (secuencial)" : "Sin cambios",
+        changed: hasChanges,
+        sequential: true,
+        ...results,
+      };
+    } catch (error) {
+      console.error(`❌ Error en sincronización secuencial:`, error.message);
+      this.syncStats.errorCount++;
+      this.syncStats.lastError = error.message;
+
+      return {
+        success: false,
+        message: error.message,
+        error: true,
+        sequential: true,
+        ...results,
       };
     }
   }
